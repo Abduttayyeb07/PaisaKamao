@@ -1,0 +1,25 @@
+{
+  "name": "zig-ws-ratio-bot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node src/ws-ratio.ts",
+    "build": "tsc -p .",
+    "start": "node dist/ws-ratio.js"
+  },
+  "dependencies": {
+    "@cosmjs/cosmwasm-stargate": "^0.32.4",
+    "@cosmjs/proto-signing": "^0.32.4",
+    "@cosmjs/stargate": "^0.32.4",
+    "dotenv": "^16.4.5",
+    "i": "^0.3.7",
+    "node-fetch": "^3.3.2",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}
