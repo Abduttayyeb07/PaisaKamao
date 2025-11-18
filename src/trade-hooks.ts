@@ -2,6 +2,8 @@ import { DirectSecp256k1Wallet } from '@cosmjs/proto-signing';
 import { SigningCosmWasmClient, CosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice, coins } from '@cosmjs/stargate';
 import { notifyTrade } from './telegram';
+import { promises as fs } from 'fs';
+import { dirname, resolve } from 'path';
 
 export type TradeContext = {
   priceUzigPerStzig: number;
@@ -14,6 +16,7 @@ export type TradeContext = {
   tradeIntent?: 'buyZig' | 'buyStzig';
   rangeLabel?: string;
   desiredZigAmount?: number;
+  orderId?: string;
 };
 
 const HTTP_RPC = process.env.HTTP_RPC || 'https://zigchain-mainnet-rpc-sanatry-01.wickhub.cc';
@@ -73,6 +76,8 @@ const POOL_RATIO_SCALE =
   POOL_MAX_RATIO > 0 ? BigInt(Math.max(1, Math.round(POOL_MAX_RATIO * SCALE_FLOAT))) : 0n;
 const WALLET_BALANCE_API = (process.env.WALLET_BALANCE_API ||
   'https://zigchain-mainnet-api.wickhub.cc/cosmos/bank/v1beta1/balances').replace(/\/+$/, '');
+const TRADE_LOG_FILE = process.env.TRADE_LOG_FILE || 'trade-history.log';
+const zoneExecutionHours: Record<string, string> = {};
 type BalanceFetchLike = (input: string, init?: any) => Promise<any>;
 let balanceFetchRef: BalanceFetchLike | null = null;
 async function getBalanceFetch(): Promise<BalanceFetchLike> {
@@ -85,6 +90,52 @@ async function getBalanceFetch(): Promise<BalanceFetchLike> {
   const mod = await import('node-fetch');
   balanceFetchRef = (mod.default || mod) as BalanceFetchLike;
   return balanceFetchRef;
+}
+
+function getHourBucket(date = new Date()): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const year = date.getUTCFullYear();
+  const month = pad(date.getUTCMonth() + 1);
+  const day = pad(date.getUTCDate());
+  const hour = pad(date.getUTCHours());
+  return `${year}-${month}-${day}T${hour}`;
+}
+
+function splitBucket(bucket: string) {
+  const [date, time] = bucket.split('T');
+  return { date: date || bucket, slot: time ? `T${time}` : '' };
+}
+
+function checkZoneAllowed(zoneLabel?: string) {
+  const bucket = getHourBucket();
+  if (!zoneLabel) return { allowed: true, bucket };
+  return { allowed: zoneExecutionHours[zoneLabel] !== bucket, bucket };
+}
+
+function markZoneExecuted(zoneLabel: string | undefined, bucket: string) {
+  if (!zoneLabel) return;
+  zoneExecutionHours[zoneLabel] = bucket;
+}
+
+type TradeLogEntry = {
+  timestamp: string;
+  bucket: string;
+  zone: string;
+  intent: string;
+  price: number;
+  amount: string;
+  txHash?: string;
+};
+
+async function appendTradeLog(entry: TradeLogEntry) {
+  try {
+    const fullPath = resolve(process.cwd(), TRADE_LOG_FILE);
+    await fs.mkdir(dirname(fullPath), { recursive: true });
+    const line = `${entry.timestamp},${entry.bucket},${entry.zone},${entry.intent},${entry.price},${entry.amount},${entry.txHash ?? ''}\n`;
+    await fs.appendFile(fullPath, line, 'utf8');
+  } catch (e) {
+    console.warn('[trade-hooks] failed to write trade log:', e instanceof Error ? e.message : e);
+  }
 }
 
 let signerClientPromise: Promise<{
@@ -381,10 +432,17 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
   const walletBalances = await getWalletBalances();
   const desiredZig = ctx.desiredZigAmount ?? FIXED_TRADE_ZIG;
   const desiredUnits = toUnits(desiredZig, UZIG_EXP);
+  const zoneLabel = ctx.rangeLabel ?? 'unknown';
+  const { allowed, bucket } = checkZoneAllowed(zoneLabel);
+  if (!allowed) {
+    console.log(`[BUY] skipping ${zoneLabel}; already traded in bucket ${bucket}`);
+    return;
+  }
   let offerAmount: string | undefined;
   let simPrice: number | undefined;
   let fallbackReason = '';
   const rangeNote = ctx.rangeLabel ? ` zone=${ctx.rangeLabel}` : '';
+  const { date: bucketDate, slot: bucketSlot } = splitBucket(bucket);
   if (USE_SIM_SIZING) {
     const sized = await sizeWithSimulation('buy', ctx, walletBalances, desiredUnits);
     if (sized && isFinite(sized.projectedPrice) && sized.offerAmount) {
@@ -411,26 +469,41 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
   try {
     const tx = await executeSwap(UZIG_DENOM, offerAmount);
     console.log(`[BUY] submitted tx=${tx}`);
-    const displayOfferZig = formatZigAmount(offerAmount, UZIG_EXP);
     const detailLines = [
-      `✅ BUY STZIG Signal (Zone: ${ctx.rangeLabel ?? 'unknown'})`,
+      `✅ BUY STZIG Signal (Order ${ctx.orderId ?? '??'} – ${ctx.rangeLabel ?? 'unknown'})`,
       `Price: ${ctx.priceUzigPerStzig.toFixed(6)}`,
       simPrice ? `Sim Price: ~${simPrice.toFixed(6)}` : undefined,
       fallbackReason ? `Note: ${fallbackReason}` : undefined,
-      `Offer: ${displayOfferZig} ZIG`,
+      `Date: ${bucketDate}`,
+      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
+      `Offer: ${formatZigAmount(offerAmount, UZIG_EXP)} ZIG`,
       `Tx: ${tx}`,
     ]
       .filter(Boolean)
       .join('\n');
     await notifyTrade(detailLines, { txHash: tx });
+    markZoneExecuted(zoneLabel, bucket);
+    await appendTradeLog({
+      timestamp: new Date().toISOString(),
+      bucket,
+      zone: zoneLabel,
+      intent: ctx.tradeIntent ?? 'buyStzig',
+      price: ctx.priceUzigPerStzig,
+      amount: formatZigAmount(offerAmount, UZIG_EXP),
+      txHash: tx,
+    });
   } catch (e) {
     console.error('[BUY] failed:', e instanceof Error ? e.message : e);
     const errLine = [
-      '❌ BUY failed',
+      `❌ BUY failed (Order ${ctx.orderId ?? '??'})`,
       `Price: ${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote}`,
+      `Date: ${bucketDate}`,
+      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
       `Offer: ${formatZigAmount(offerAmount, UZIG_EXP)} ZIG`,
       `Error: ${e instanceof Error ? e.message : String(e)}`,
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
     await notifyTrade(errLine);
   }
 }
@@ -440,10 +513,17 @@ export async function onSell(ctx: TradeContext): Promise<void> {
   const walletBalances = await getWalletBalances();
   const desiredZig = ctx.desiredZigAmount ?? FIXED_TRADE_ZIG;
   const desiredUnits = toUnits(desiredZig, STZIG_EXP);
+  const zoneLabel = ctx.rangeLabel ?? 'unknown';
+  const { allowed, bucket } = checkZoneAllowed(zoneLabel);
+  if (!allowed) {
+    console.log(`[SELL] skipping ${zoneLabel}; already traded in bucket ${bucket}`);
+    return;
+  }
   let offerAmount: string | undefined;
   let simPrice: number | undefined;
   let fallbackReason = '';
   const rangeNote = ctx.rangeLabel ? ` zone=${ctx.rangeLabel}` : '';
+  const { date: bucketDate, slot: bucketSlot } = splitBucket(bucket);
   if (USE_SIM_SIZING) {
     const sized = await sizeWithSimulation('sell', ctx, walletBalances, desiredUnits);
     if (sized && isFinite(sized.projectedPrice) && sized.offerAmount) {
@@ -470,26 +550,41 @@ export async function onSell(ctx: TradeContext): Promise<void> {
   try {
     const tx = await executeSwap(STZIG_DENOM, offerAmount);
     console.log(`[SELL] submitted tx=${tx}`);
-    const displayOfferZig = formatZigAmount(offerAmount, STZIG_EXP);
     const detailLines = [
-      `✅ SELL STZIG Signal (Zone: ${ctx.rangeLabel ?? 'unknown'})`,
+      `✅ SELL STZIG Signal (Order ${ctx.orderId ?? '??'} – ${ctx.rangeLabel ?? 'unknown'})`,
       `Price: ${ctx.priceUzigPerStzig.toFixed(6)}`,
       simPrice ? `Sim Price: ~${simPrice.toFixed(6)}` : undefined,
       fallbackReason ? `Note: ${fallbackReason}` : undefined,
-      `Offer: ${displayOfferZig} ZIG`,
+      `Date: ${bucketDate}`,
+      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
+      `Offer: ${formatZigAmount(offerAmount, STZIG_EXP)} ZIG`,
       `Tx: ${tx}`,
     ]
       .filter(Boolean)
       .join('\n');
     await notifyTrade(detailLines, { txHash: tx });
+    markZoneExecuted(zoneLabel, bucket);
+    await appendTradeLog({
+      timestamp: new Date().toISOString(),
+      bucket,
+      zone: zoneLabel,
+      intent: ctx.tradeIntent ?? 'buyZig',
+      price: ctx.priceUzigPerStzig,
+      amount: formatZigAmount(offerAmount, STZIG_EXP),
+      txHash: tx,
+    });
   } catch (e) {
     console.error('[SELL] failed:', e instanceof Error ? e.message : e);
     const errLine = [
-      '❌ SELL failed',
+      `❌ SELL failed (Order ${ctx.orderId ?? '??'})`,
       `Price: ${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote}`,
+      `Date: ${bucketDate}`,
+      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
       `Offer: ${formatZigAmount(offerAmount, STZIG_EXP)} ZIG`,
       `Error: ${e instanceof Error ? e.message : String(e)}`,
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
     await notifyTrade(errLine);
   }
 }
