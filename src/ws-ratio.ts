@@ -63,7 +63,7 @@ type TradeZone = {
 };
 
 const BUY_ZIG_ZONES: TradeZone[] = [
-  { min: 1.012, max: 1.015, sizeZig: 1, label: 'BUY_ZIG 1.0140-1.0150', orderId: 'J' },
+  { min: 1.014, max: 1.015, sizeZig: 1, label: 'BUY_ZIG 1.0140-1.0150', orderId: 'J' },
   { min: 1.0151, max: 1.018, sizeZig: 1, label: 'BUY_ZIG 1.0151-1.0180', orderId: 'K' },
   { min: 1.0181, max: 1.02, sizeZig: 1, label: 'BUY_ZIG 1.0181-1.0200', orderId: 'L' },
   { min: 1.0201, max: 1.022, sizeZig: 1, label: 'BUY_ZIG 1.0201-1.0220', orderId: 'M' },
