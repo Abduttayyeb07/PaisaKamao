@@ -363,9 +363,8 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
     const errLine = [
       `❌ BUY failed (Order ${ctx.orderId ?? '??'})`,
       `Price: ${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote}`,
-      `Date: ${bucketDate}`,
-      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
       `Offer: ${formatZigAmount(offerAmount, UZIG_EXP)} ZIG`,
+      `Slot: ${bucketSlot} — ${bucketDate}`,
       `Error: ${e instanceof Error ? e.message : String(e)}`,
     ]
       .filter(Boolean)
@@ -442,9 +441,8 @@ export async function onSell(ctx: TradeContext): Promise<void> {
     const errLine = [
       `❌ SELL failed (Order ${ctx.orderId ?? '??'})`,
       `Price: ${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote}`,
-      `Date: ${bucketDate}`,
-      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
       `Offer: ${formatZigAmount(offerAmount, STZIG_EXP)} ZIG`,
+      `Slot: ${bucketSlot} — ${bucketDate}`,
       `Error: ${e instanceof Error ? e.message : String(e)}`,
     ]
       .filter(Boolean)
