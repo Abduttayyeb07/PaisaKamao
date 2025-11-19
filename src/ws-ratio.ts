@@ -29,13 +29,11 @@ const SMOOTHING_ALPHA =
     ? Math.min(PRICE_SMOOTHING_ALPHA, 1)
     : 0.25;
 
-const BUY_ZIG_FROM = Number(process.env.BUY_ZIG_FROM || '1.015');
+
 const BUY_ZIG_TO = Number(process.env.BUY_ZIG_TO || '1.038');
-const BUY_ZIG_STEP = Number(process.env.BUY_ZIG_STEP || '0.005');
 const SELL_STZIG_FROM = Number(process.env.SELL_STZIG_FROM || '0.991');
-const SELL_STZIG_TO = Number(process.env.SELL_STZIG_TO || '1.008');
-const SELL_STZIG_STEP = Number(process.env.SELL_STZIG_STEP || '0.005');
-const FIXED_TRADE_ZIG = Number(process.env.FIXED_TRADE_ZIG || '1');
+const TRADE_UNIT = Number(process.env.TRADE_UNIT || '1');
+const TRADE_UNIT_SCALE = Number.isFinite(TRADE_UNIT) && TRADE_UNIT > 0 ? TRADE_UNIT : 1;
 
 const BAND_EPSILON = 0.0001;
 function normalizeBand(lower: number, upper: number) {
@@ -65,26 +63,26 @@ type TradeZone = {
 };
 
 const BUY_ZIG_ZONES: TradeZone[] = [
-  { min: 1.014, max: 1.015, sizeZig: 1, label: 'BUY_ZIG 1.0140-1.0150', orderId: 'J' },
-  { min: 1.0151, max: 1.018, sizeZig: 1.2, label: 'BUY_ZIG 1.0151-1.0180', orderId: 'K' },
-  { min: 1.0181, max: 1.02, sizeZig: 1.4, label: 'BUY_ZIG 1.0181-1.0200', orderId: 'L' },
-  { min: 1.0201, max: 1.022, sizeZig: 1.6, label: 'BUY_ZIG 1.0201-1.0220', orderId: 'M' },
-  { min: 1.0221, max: 1.024, sizeZig: 1.8, label: 'BUY_ZIG 1.0221-1.0240', orderId: 'N' },
-  { min: 1.0241, max: 1.026, sizeZig: 2, label: 'BUY_ZIG 1.0241-1.0260', orderId: 'O' },
-  { min: 1.0261, max: 1.028, sizeZig: 2.1, label: 'BUY_ZIG 1.0261-1.0280', orderId: 'P' },
-  { min: 1.0281, max: 1.03, sizeZig: 2.2, label: 'BUY_ZIG 1.0281-1.0300', orderId: 'Q' },
+  { min: 1.012, max: 1.015, sizeZig: 1, label: 'BUY_ZIG 1.0140-1.0150', orderId: 'J' },
+  { min: 1.0151, max: 1.018, sizeZig: 1, label: 'BUY_ZIG 1.0151-1.0180', orderId: 'K' },
+  { min: 1.0181, max: 1.02, sizeZig: 1, label: 'BUY_ZIG 1.0181-1.0200', orderId: 'L' },
+  { min: 1.0201, max: 1.022, sizeZig: 1, label: 'BUY_ZIG 1.0201-1.0220', orderId: 'M' },
+  { min: 1.0221, max: 1.024, sizeZig: 1, label: 'BUY_ZIG 1.0221-1.0240', orderId: 'N' },
+  { min: 1.0241, max: 1.026, sizeZig: 1, label: 'BUY_ZIG 1.0241-1.0260', orderId: 'O' },
+  { min: 1.0261, max: 1.028, sizeZig: 1, label: 'BUY_ZIG 1.0261-1.0280', orderId: 'P' },
+  { min: 1.0281, max: 1.03, sizeZig: 1, label: 'BUY_ZIG 1.0281-1.0300', orderId: 'Q' },
 ];
 
 const BUY_STZIG_ZONES: TradeZone[] = [
   { min: 1.0041, max: 1.007, sizeZig: 1, label: 'BUY_STZIG 1.0041-1.0070', orderId: 'A' },
-  { min: 1.0011, max: 1.004, sizeZig: 1.2, label: 'BUY_STZIG 1.0011-1.0040', orderId: 'B' },
-  { min: 1.0001, max: 1.001, sizeZig: 1.4, label: 'BUY_STZIG 1.0001-1.0010', orderId: 'C' },
-  { min: 0.9901, max: 1.0, sizeZig: 1.6, label: 'BUY_STZIG 0.9901-1.0000', orderId: 'D' },
-  { min: 0.9951, max: 0.99, sizeZig: 1.8, label: 'BUY_STZIG 0.9951-0.9900', orderId: 'E' },
-  { min: 0.9941, max: 0.995, sizeZig: 2, label: 'BUY_STZIG 0.9941-0.9950', orderId: 'F' },
-  { min: 0.9921, max: 0.994, sizeZig: 2.1, label: 'BUY_STZIG 0.9921-0.9940', orderId: 'G' },
-  { min: 0.9911, max: 0.992, sizeZig: 2.2, label: 'BUY_STZIG 0.9911-0.9920', orderId: 'H' },
-  { min: 0.9905, max: 0.991, sizeZig: 2.3, label: 'BUY_STZIG 0.9905-0.9910', orderId: 'I' },
+  { min: 1.0011, max: 1.004, sizeZig: 1, label: 'BUY_STZIG 1.0011-1.0040', orderId: 'B' },
+  { min: 1.0001, max: 1.001, sizeZig: 1, label: 'BUY_STZIG 1.0001-1.0010', orderId: 'C' },
+  { min: 0.9901, max: 1.0, sizeZig: 1, label: 'BUY_STZIG 0.9901-1.0000', orderId: 'D' },
+  { min: 0.9951, max: 0.99, sizeZig: 1, label: 'BUY_STZIG 0.9951-0.9900', orderId: 'E' },
+  { min: 0.9941, max: 0.995, sizeZig: 1, label: 'BUY_STZIG 0.9941-0.9950', orderId: 'F' },
+  { min: 0.9921, max: 0.994, sizeZig: 1, label: 'BUY_STZIG 0.9921-0.9940', orderId: 'G' },
+  { min: 0.9911, max: 0.992, sizeZig: 1, label: 'BUY_STZIG 0.9911-0.9920', orderId: 'H' },
+  { min: 0.9905, max: 0.991, sizeZig: 1, label: 'BUY_STZIG 0.9905-0.9910', orderId: 'I' },
 ];
 
 const EPSILON = 1e-9;
@@ -324,7 +322,7 @@ class TendermintWS {
         walletAddress: WALLET_ADDRESS,
         tradeIntent: zone.type,
         rangeLabel: zone.zone.label,
-        desiredZigAmount: zone.zone.sizeZig,
+        desiredZigAmount: zone.zone.sizeZig * TRADE_UNIT_SCALE,
         orderId: zone.zone.orderId,
       };
 

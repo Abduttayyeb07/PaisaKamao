@@ -1,8 +1,8 @@
-import { DirectSecp256k1Wallet } from '@cosmjs/proto-signing';
+﻿import { DirectSecp256k1Wallet } from '@cosmjs/proto-signing';
 import { SigningCosmWasmClient, CosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice, coins } from '@cosmjs/stargate';
 import { notifyTrade } from './telegram';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 
 export type TradeContext = {
@@ -35,12 +35,6 @@ const UZIG_DENOM = process.env.UZIG_DENOM || 'uzig';
 const STZIG_EXP = Number(process.env.STZIG_EXP || '6');
 const UZIG_EXP = Number(process.env.UZIG_EXP || '6');
 
-const SIZE_TIERS = (process.env.SIZE_TIERS || '1,2,3')
-  .split(',')
-  .map((s) => Number(s.trim()))
-  .filter((n) => Number.isFinite(n) && n > 0)
-  .sort((a, b) => a - b);
-
 const RAW_UPPER_TARGET = Number(process.env.UPPER_TARGET || '1.01');
 const RAW_LOWER_TARGET = Number(process.env.LOWER_TARGET || '0.99');
 const BAND_EPSILON = 0.0001;
@@ -60,24 +54,27 @@ function normalizeBand(lower: number, upper: number) {
 }
 const NORMALIZED_BAND = normalizeBand(RAW_LOWER_TARGET, RAW_UPPER_TARGET);
 const PRICE_CENTER = (NORMALIZED_BAND.lower + NORMALIZED_BAND.upper) / 2;
-const WALLET_MAX_RATIO = Math.max(0, Number(process.env.WALLET_MAX_RATIO || '0.02'));
-const POOL_MAX_RATIO = Math.max(0, Number(process.env.POOL_MAX_RATIO || '0.015'));
 const MAX_SLIPPAGE = Number(process.env.MAX_SLIPPAGE || process.env.MAX_SPREAD || '0.002');
 const MAX_SPREAD = Math.min(Math.max(MAX_SLIPPAGE, 0), 1);
 const USE_SIM_SIZING = String(process.env.USE_SIM_SIZING || 'true').toLowerCase() === 'true';
-const MAX_POOL_IMPACT_BPS = Number(process.env.MAX_POOL_IMPACT_BPS || '500'); // 5%
 const DEBUG_SIM = String(process.env.DEBUG_SIM || 'false').toLowerCase() === 'true';
-const RATIO_SCALE = 1_000_000n;
 const FIXED_TRADE_ZIG = Number(process.env.FIXED_TRADE_ZIG || '1');
-const SCALE_FLOAT = Number(RATIO_SCALE);
-const WALLET_RATIO_SCALE =
-  WALLET_MAX_RATIO > 0 ? BigInt(Math.max(1, Math.round(WALLET_MAX_RATIO * SCALE_FLOAT))) : 0n;
-const POOL_RATIO_SCALE =
-  POOL_MAX_RATIO > 0 ? BigInt(Math.max(1, Math.round(POOL_MAX_RATIO * SCALE_FLOAT))) : 0n;
-const WALLET_BALANCE_API = (process.env.WALLET_BALANCE_API ||
-  'https://zigchain-mainnet-api.wickhub.cc/cosmos/bank/v1beta1/balances').replace(/\/+$/, '');
 const TRADE_LOG_FILE = process.env.TRADE_LOG_FILE || 'trade-history.log';
+const TRADE_CSV_FILE = process.env.TRADE_CSV_FILE || 'trade-actions.csv';
+const ZONE_STATE_FILE = process.env.ZONE_STATE_FILE || 'zone-state.json';
+const ZONE_STATE_PATH = resolve(process.cwd(), ZONE_STATE_FILE);
 const zoneExecutionHours: Record<string, string> = {};
+
+function loadZoneState() {
+  try {
+    const data = readFileSync(ZONE_STATE_PATH, 'utf8');
+    const parsed = JSON.parse(data);
+    if (parsed && typeof parsed === 'object') Object.assign(zoneExecutionHours, parsed);
+  } catch {
+    // ignore missing file
+  }
+}
+loadZoneState();
 type BalanceFetchLike = (input: string, init?: any) => Promise<any>;
 let balanceFetchRef: BalanceFetchLike | null = null;
 async function getBalanceFetch(): Promise<BalanceFetchLike> {
@@ -112,9 +109,19 @@ function checkZoneAllowed(zoneLabel?: string) {
   return { allowed: zoneExecutionHours[zoneLabel] !== bucket, bucket };
 }
 
-function markZoneExecuted(zoneLabel: string | undefined, bucket: string) {
+async function persistZoneState() {
+  try {
+    await fs.mkdir(dirname(ZONE_STATE_PATH), { recursive: true });
+    await fs.writeFile(ZONE_STATE_PATH, JSON.stringify(zoneExecutionHours), 'utf8');
+  } catch {
+    // ignore
+  }
+}
+
+async function markZoneExecuted(zoneLabel: string | undefined, bucket: string) {
   if (!zoneLabel) return;
   zoneExecutionHours[zoneLabel] = bucket;
+  await persistZoneState();
 }
 
 type TradeLogEntry = {
@@ -135,6 +142,27 @@ async function appendTradeLog(entry: TradeLogEntry) {
     await fs.appendFile(fullPath, line, 'utf8');
   } catch (e) {
     console.warn('[trade-hooks] failed to write trade log:', e instanceof Error ? e.message : e);
+  }
+}
+
+async function appendActionCsv(action: string, range: string, price: number, txHash: string) {
+  try {
+    const fullPath = resolve(process.cwd(), TRADE_CSV_FILE);
+    await fs.mkdir(dirname(fullPath), { recursive: true });
+    let needHeader = false;
+    try {
+      const stat = await fs.stat(fullPath);
+      if (stat.size === 0) needHeader = true;
+    } catch {
+      needHeader = true;
+    }
+    if (needHeader) {
+      await fs.appendFile(fullPath, 'Action,Range,Price,Tx\n', 'utf8');
+    }
+    const line = `"${action}","${range}",${price.toFixed(6)},"https://www.zigscan.org/tx/${txHash}"\n`;
+    await fs.appendFile(fullPath, line, 'utf8');
+  } catch (e) {
+    console.warn('[trade-hooks] failed to write action csv:', e instanceof Error ? e.message : e);
   }
 }
 
@@ -174,38 +202,6 @@ async function getQueryClient(): Promise<CosmWasmClient> {
   return queryClientPromise;
 }
 
-type WalletBalances = { stzig: bigint; uzig: bigint };
-
-function toBigInt(value?: string): bigint {
-  if (!value) return 0n;
-  try {
-    return BigInt(value);
-  } catch {
-    return 0n;
-  }
-}
-
-async function fetchBalancesFromApi(address: string): Promise<WalletBalances | null> {
-  if (!address || !WALLET_BALANCE_API) return null;
-  try {
-    const fetchFn = await getBalanceFetch();
-    const res = await fetchFn(`${WALLET_BALANCE_API}/${address}`, { headers: { Accept: 'application/json' } });
-    if (!res.ok) {
-      throw new Error(`status ${res.status}`);
-    }
-    const data = await res.json();
-    const list: Array<{ denom: string; amount: string }> = Array.isArray(data?.balances) ? data.balances : [];
-    const st = toBigInt(list.find((b) => b.denom === STZIG_DENOM)?.amount);
-    const uz = toBigInt(list.find((b) => b.denom === UZIG_DENOM)?.amount);
-    const found = list.some((b) => b.denom === STZIG_DENOM || b.denom === UZIG_DENOM);
-    if (!found) return null;
-    return { stzig: st, uzig: uz };
-  } catch (e) {
-    console.warn('[trade-hooks] wallet balance REST fetch failed:', e instanceof Error ? e.message : e);
-    return null;
-  }
-}
-
 function formatZigAmount(amountStr: string, decimals: number): string {
   const amount = BigInt(amountStr);
   const scale = 10n ** BigInt(decimals);
@@ -215,33 +211,6 @@ function formatZigAmount(amountStr: string, decimals: number): string {
   let frac = fraction.toString().padStart(decimals, '0');
   frac = frac.replace(/0+$/g, '');
   return `${integer.toString()}.${frac}`;
-}
-
-async function getWalletBalances(): Promise<WalletBalances> {
-  const fallback = {
-    stzig: toUnits(Number(process.env.WALLET_STZIG || '0'), STZIG_EXP),
-    uzig: toUnits(Number(process.env.WALLET_UZIG || '0'), UZIG_EXP),
-  };
-  const address = WALLET_ADDRESS;
-  if (address) {
-    const apiBalances = await fetchBalancesFromApi(address);
-    if (apiBalances) return apiBalances;
-  }
-  try {
-    if (!PRIVATE_KEY) return fallback;
-    const { client, address: signerAddress } = await getClient();
-    const [st, uz] = await Promise.all([
-      client.getBalance(signerAddress, STZIG_DENOM).catch(() => ({ amount: '0' })),
-      client.getBalance(signerAddress, UZIG_DENOM).catch(() => ({ amount: '0' })),
-    ]);
-    return {
-      stzig: toBigInt(st.amount) || fallback.stzig,
-      uzig: toBigInt(uz.amount) || fallback.uzig,
-    };
-  } catch (e) {
-    console.warn('[trade-hooks] wallet balance fetch failed:', e instanceof Error ? e.message : e);
-  }
-  return fallback;
 }
 
 function toBaseUnits(amount: number, decimals: number): string {
@@ -302,135 +271,37 @@ function fromUnits(n: bigint, decimals: number): number {
   return Number(n) / 10 ** decimals;
 }
 
-function minPositive(...vals: bigint[]): bigint {
-  const candidates = vals.filter((n) => n > 0n);
-  if (!candidates.length) return 0n;
-  return candidates.reduce((prev, curr) => (curr < prev ? curr : prev));
-}
-
-function computeRatioCap(side: 'sell' | 'buy', ctx: TradeContext, walletBalances: WalletBalances): bigint {
-  if (WALLET_RATIO_SCALE <= 0n || POOL_RATIO_SCALE <= 0n) return 0n;
-  const denomBalance = side === 'sell' ? ctx.stzig : ctx.uzig;
-  const walletBalance = side === 'sell' ? walletBalances.stzig : walletBalances.uzig;
-  const poolCap = (denomBalance * POOL_RATIO_SCALE) / RATIO_SCALE;
-  const walletCap = (walletBalance * WALLET_RATIO_SCALE) / RATIO_SCALE;
-  const cap = poolCap < walletCap ? poolCap : walletCap;
-  return cap > 0n ? cap : 0n;
-}
-
-function impactCapForSide(side: 'sell' | 'buy', ctx: TradeContext): bigint {
-  if (MAX_POOL_IMPACT_BPS <= 0) return 0n;
-  const denomBalance = side === 'sell' ? ctx.stzig : ctx.uzig;
-  return (denomBalance * BigInt(MAX_POOL_IMPACT_BPS)) / 10000n;
-}
-
-function capOffer(
+async function simulateProjection(
   side: 'sell' | 'buy',
   ctx: TradeContext,
-  walletBalances: WalletBalances,
-  amount: bigint
-): bigint {
-  if (amount <= 0n) return 0n;
-  const ratioCap = computeRatioCap(side, ctx, walletBalances);
-  const impactCap = impactCapForSide(side, ctx);
-  if (ratioCap <= 0n || impactCap <= 0n) return 0n;
-  const safeCap = ratioCap < impactCap ? ratioCap : impactCap;
-  return amount > safeCap ? safeCap : amount;
-}
-
-async function sizeWithSimulation(
-  side: 'sell' | 'buy',
-  ctx: TradeContext,
-  walletBalances: WalletBalances,
-  desiredAmount?: bigint
-): Promise<{ offerAmount: string; projectedPrice: number } | null> {
-  const target = side === 'sell' ? ctx.upperTarget : ctx.lowerTarget;
-  if (!Number.isFinite(target)) return null;
-  const eps = 1e-5;
-
-  const minTier = SIZE_TIERS[0] || 50;
-  const maxTier = SIZE_TIERS[SIZE_TIERS.length - 1] || minTier;
-  let minAmt = side === 'sell' ? toUnits(minTier, STZIG_EXP) : toUnits(minTier, UZIG_EXP);
-  const maxTierAmt = side === 'sell' ? toUnits(maxTier, STZIG_EXP) : toUnits(maxTier, UZIG_EXP);
-  const ratioCap = computeRatioCap(side, ctx, walletBalances);
-  const impactCap = impactCapForSide(side, ctx);
-  if (ratioCap <= 0n || impactCap <= 0n) return null;
-  const limit = desiredAmount && desiredAmount > 0n
-    ? minPositive(maxTierAmt, ratioCap, impactCap, desiredAmount)
-    : minPositive(maxTierAmt, ratioCap, impactCap);
-  if (limit <= 0n) return null;
-  if (desiredAmount && desiredAmount > 0n && desiredAmount < minAmt) minAmt = desiredAmount;
-
-  const effectiveMin = desiredAmount && desiredAmount > 0n && desiredAmount < minAmt ? desiredAmount : minAmt;
-  let lo = effectiveMin <= limit ? effectiveMin : limit;
-  let hi = limit;
-  let best = lo;
-  let bestProj = Number.POSITIVE_INFINITY;
-  let bestDist = Number.POSITIVE_INFINITY;
-  let sawValid = false;
-
-  for (let i = 0; i < 14 && lo <= hi; i++) {
-    const mid = (lo + hi) / 2n;
-    const offer = mid === 0n ? 1n : clamp(mid, lo, hi);
-    let proj: number;
-    try {
-      if (side === 'sell') {
-        const dy = await simulateSwapQuery(STZIG_DENOM, offer.toString());
-        proj = Number(ctx.uzig - dy) / Number(ctx.stzig + offer);
-        if (Number.isNaN(proj) || !isFinite(proj)) throw new Error('bad proj');
-        if (proj > target) {
-          lo = offer + 1n;
-        } else {
-          hi = offer - 1n;
-        }
-      } else {
-        const s = await simulateSwapQuery(UZIG_DENOM, offer.toString());
-        proj = Number(ctx.uzig + offer) / Number(ctx.stzig - s);
-        if (Number.isNaN(proj) || !isFinite(proj)) throw new Error('bad proj');
-        if (proj < target) {
-          lo = offer + 1n;
-        } else {
-          hi = offer - 1n;
-        }
-      }
-      sawValid = true;
-      const dist = Math.abs(proj - target);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestProj = proj;
-        best = offer;
-      }
-      if (DEBUG_SIM) {
-        console.log(`[sim] side=${side} offer=${offer.toString()} proj=${proj.toFixed(6)} target=${target}`);
-      }
-      if (Math.abs(proj - target) <= eps) {
-        best = offer;
-        bestProj = proj;
-        break;
-      }
-    } catch (e) {
-      if (DEBUG_SIM) {
-        console.warn(`[sim] step error: ${e instanceof Error ? e.message : String(e)}`);
-      }
-      break;
+  offerAmount: bigint
+): Promise<number | undefined> {
+  try {
+    if (side === 'sell') {
+      const dy = await simulateSwapQuery(STZIG_DENOM, offerAmount.toString());
+      const denomSt = ctx.stzig + offerAmount;
+      if (denomSt === 0n) return undefined;
+      return Number(ctx.uzig - dy) / Number(denomSt);
     }
-  }
-
-  if (!sawValid || !isFinite(bestProj)) {
+    const stzigReceived = await simulateSwapQuery(UZIG_DENOM, offerAmount.toString());
+    const denomSt = ctx.stzig - stzigReceived;
+    if (denomSt === 0n) return undefined;
+    return Number(ctx.uzig + offerAmount) / Number(denomSt);
+  } catch (e) {
     if (DEBUG_SIM) {
-      console.warn('[sim] no valid projection; will fall back to tier sizing');
+      console.warn('[sim] projection failed:', e instanceof Error ? e.message : String(e));
     }
-    return null;
+    return undefined;
   }
-  const clamped = clamp(best, minAmt, limit);
-  if (clamped <= 0n) return null;
-  return { offerAmount: clamped.toString(), projectedPrice: bestProj };
 }
 
 export async function onBuy(ctx: TradeContext): Promise<void> {
   // Buy STZIG with UZIG (offer = uzig)
-  const walletBalances = await getWalletBalances();
   const desiredZig = ctx.desiredZigAmount ?? FIXED_TRADE_ZIG;
+  if (desiredZig <= 0) {
+    console.warn('[BUY] desired zig amount must be >0');
+    return;
+  }
   const desiredUnits = toUnits(desiredZig, UZIG_EXP);
   const zoneLabel = ctx.rangeLabel ?? 'unknown';
   const { allowed, bucket } = checkZoneAllowed(zoneLabel);
@@ -438,26 +309,16 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
     console.log(`[BUY] skipping ${zoneLabel}; already traded in bucket ${bucket}`);
     return;
   }
-  let offerAmount: string | undefined;
-  let simPrice: number | undefined;
-  let fallbackReason = '';
-  const rangeNote = ctx.rangeLabel ? ` zone=${ctx.rangeLabel}` : '';
   const { date: bucketDate, slot: bucketSlot } = splitBucket(bucket);
+  const rangeNote = ctx.rangeLabel ? ` zone=${ctx.rangeLabel}` : '';
+  const offerAmount = desiredUnits.toString();
+  let simPrice: number | undefined;
+  let note = '';
   if (USE_SIM_SIZING) {
-    const sized = await sizeWithSimulation('buy', ctx, walletBalances, desiredUnits);
-    if (sized && isFinite(sized.projectedPrice) && sized.offerAmount) {
-      offerAmount = sized.offerAmount;
-      simPrice = sized.projectedPrice;
+    simPrice = await simulateProjection('buy', ctx, desiredUnits);
+    if (!simPrice) {
+      note = 'Sim projection unavailable; executing desired amount';
     }
-  }
-  if (!offerAmount) {
-    const capped = capOffer('buy', ctx, walletBalances, desiredUnits);
-    if (capped <= 0n) {
-      console.warn('[BUY] skipped; capped offer is 0 (wallet or pool ratio limit)');
-      return;
-    }
-    offerAmount = capped.toString();
-    fallbackReason = 'sim not available; using fixed size';
   }
   console.log(
     `[BUY] price=${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote} offer ${offerAmount} UZIG`
@@ -469,15 +330,14 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
   try {
     const tx = await executeSwap(UZIG_DENOM, offerAmount);
     console.log(`[BUY] submitted tx=${tx}`);
+    const { slot: slotLabel } = splitBucket(bucket);
     const detailLines = [
-      `✅ BUY STZIG Signal (Order ${ctx.orderId ?? '??'} – ${ctx.rangeLabel ?? 'unknown'})`,
-      `Price: ${ctx.priceUzigPerStzig.toFixed(6)}`,
-      simPrice ? `Sim Price: ~${simPrice.toFixed(6)}` : undefined,
-      fallbackReason ? `Note: ${fallbackReason}` : undefined,
-      `Date: ${bucketDate}`,
-      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
+      `📈 BUY STZIG — Order ${ctx.orderId ?? '??'} (${ctx.rangeLabel ?? 'unknown'})`,
+      `Live: ${ctx.priceUzigPerStzig.toFixed(6)}`,
+      simPrice ? `Sim: ~${simPrice.toFixed(6)}` : undefined,
       `Offer: ${formatZigAmount(offerAmount, UZIG_EXP)} ZIG`,
-      `Tx: ${tx}`,
+      `Slot: ${slotLabel} — ${bucketDate}`,
+      `Tx: https://www.zigscan.org/tx/${tx}`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -492,6 +352,12 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
       amount: formatZigAmount(offerAmount, UZIG_EXP),
       txHash: tx,
     });
+    await appendActionCsv(
+      `✅ BUY STZIG Signal (Order ${ctx.orderId ?? '??'})`,
+      ctx.rangeLabel ?? 'unknown',
+      ctx.priceUzigPerStzig,
+      tx
+    );
   } catch (e) {
     console.error('[BUY] failed:', e instanceof Error ? e.message : e);
     const errLine = [
@@ -510,8 +376,11 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
 
 export async function onSell(ctx: TradeContext): Promise<void> {
   // Sell STZIG for UZIG (offer = stzig)
-  const walletBalances = await getWalletBalances();
   const desiredZig = ctx.desiredZigAmount ?? FIXED_TRADE_ZIG;
+  if (desiredZig <= 0) {
+    console.warn('[SELL] desired zig amount must be >0');
+    return;
+  }
   const desiredUnits = toUnits(desiredZig, STZIG_EXP);
   const zoneLabel = ctx.rangeLabel ?? 'unknown';
   const { allowed, bucket } = checkZoneAllowed(zoneLabel);
@@ -519,26 +388,16 @@ export async function onSell(ctx: TradeContext): Promise<void> {
     console.log(`[SELL] skipping ${zoneLabel}; already traded in bucket ${bucket}`);
     return;
   }
-  let offerAmount: string | undefined;
-  let simPrice: number | undefined;
-  let fallbackReason = '';
-  const rangeNote = ctx.rangeLabel ? ` zone=${ctx.rangeLabel}` : '';
   const { date: bucketDate, slot: bucketSlot } = splitBucket(bucket);
+  const rangeNote = ctx.rangeLabel ? ` zone=${ctx.rangeLabel}` : '';
+  const offerAmount = desiredUnits.toString();
+  let simPrice: number | undefined;
+  let note = '';
   if (USE_SIM_SIZING) {
-    const sized = await sizeWithSimulation('sell', ctx, walletBalances, desiredUnits);
-    if (sized && isFinite(sized.projectedPrice) && sized.offerAmount) {
-      offerAmount = sized.offerAmount;
-      simPrice = sized.projectedPrice;
+    simPrice = await simulateProjection('sell', ctx, desiredUnits);
+    if (!simPrice) {
+      note = 'Sim projection unavailable; executing desired amount';
     }
-  }
-  if (!offerAmount) {
-    const capped = capOffer('sell', ctx, walletBalances, desiredUnits);
-    if (capped <= 0n) {
-      console.warn('[SELL] skipped; capped offer is 0 (wallet or pool ratio limit)');
-      return;
-    }
-    offerAmount = capped.toString();
-    fallbackReason = 'sim not available; using fixed size';
   }
   console.log(
     `[SELL] price=${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote} offer ${offerAmount} STZIG`
@@ -550,20 +409,19 @@ export async function onSell(ctx: TradeContext): Promise<void> {
   try {
     const tx = await executeSwap(STZIG_DENOM, offerAmount);
     console.log(`[SELL] submitted tx=${tx}`);
+    const { slot: slotLabel } = splitBucket(bucket);
     const detailLines = [
-      `✅ SELL STZIG Signal (Order ${ctx.orderId ?? '??'} – ${ctx.rangeLabel ?? 'unknown'})`,
-      `Price: ${ctx.priceUzigPerStzig.toFixed(6)}`,
-      simPrice ? `Sim Price: ~${simPrice.toFixed(6)}` : undefined,
-      fallbackReason ? `Note: ${fallbackReason}` : undefined,
-      `Date: ${bucketDate}`,
-      bucketSlot ? `Time slot: ${bucketSlot}` : undefined,
+      `📉 SELL STZIG — Order ${ctx.orderId ?? '??'} (${ctx.rangeLabel ?? 'unknown'})`,
+      `Live: ${ctx.priceUzigPerStzig.toFixed(6)}`,
+      simPrice ? `Sim: ~${simPrice.toFixed(6)}` : undefined,
       `Offer: ${formatZigAmount(offerAmount, STZIG_EXP)} ZIG`,
-      `Tx: ${tx}`,
+      `Slot: ${slotLabel} — ${bucketDate}`,
+      `Tx: https://www.zigscan.org/tx/${tx}`,
     ]
       .filter(Boolean)
       .join('\n');
     await notifyTrade(detailLines, { txHash: tx });
-    markZoneExecuted(zoneLabel, bucket);
+    await markZoneExecuted(zoneLabel, bucket);
     await appendTradeLog({
       timestamp: new Date().toISOString(),
       bucket,
@@ -573,6 +431,12 @@ export async function onSell(ctx: TradeContext): Promise<void> {
       amount: formatZigAmount(offerAmount, STZIG_EXP),
       txHash: tx,
     });
+    await appendActionCsv(
+      `✅ SELL STZIG Signal (Order ${ctx.orderId ?? '??'})`,
+      ctx.rangeLabel ?? 'unknown',
+      ctx.priceUzigPerStzig,
+      tx
+    );
   } catch (e) {
     console.error('[SELL] failed:', e instanceof Error ? e.message : e);
     const errLine = [

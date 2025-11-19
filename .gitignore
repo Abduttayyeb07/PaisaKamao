@@ -2,4 +2,6 @@
 node_modules
 dist
 subscribers.csv
-
+trade-actions.csv
+trade-histroy.log
+zone-state.json
