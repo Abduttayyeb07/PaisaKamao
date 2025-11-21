@@ -180,8 +180,8 @@ function ensurePkHex(pk: string): string {
   return v;
 }
 
-async function getClient(): Promise<{ client: SigningCosmWasmClient; address: string }> {
-  if (!signerClientPromise) {
+async function getClient(refresh = false): Promise<{ client: SigningCosmWasmClient; address: string }> {
+  if (!signerClientPromise || refresh) {
     signerClientPromise = (async () => {
       if (!PRIVATE_KEY) throw new Error('Missing PRIVATE_KEY in env');
       const pk = ensurePkHex(PRIVATE_KEY);
@@ -220,22 +220,34 @@ function toBaseUnits(amount: number, decimals: number): string {
 
 async function executeSwap(offerDenom: string, offerAmount: string) {
   if (!POOL_CONTRACT) throw new Error('Missing POOL_CONTRACT');
-  const { client, address } = await getClient();
-
-  const msg = {
-    swap: {
-      max_spread: MAX_SPREAD.toFixed(3),
-      offer_asset: {
-        amount: offerAmount,
-        info: { native_token: { denom: offerDenom } },
+  const attempt = async (refresh: boolean) => {
+    const { client, address } = await getClient(refresh);
+    const msg = {
+      swap: {
+        max_spread: MAX_SPREAD.toFixed(3),
+        offer_asset: {
+          amount: offerAmount,
+          info: { native_token: { denom: offerDenom } },
+        },
+        to: address,
       },
-      to: address,
-    },
-  } as const;
+    } as const;
+    const funds = coins(offerAmount, offerDenom);
+    return client.execute(address, POOL_CONTRACT, msg, 'auto', undefined, funds);
+  };
 
-  const funds = coins(offerAmount, offerDenom);
-  const res = await client.execute(address, POOL_CONTRACT, msg, 'auto', undefined, funds);
-  return res.transactionHash;
+  try {
+    const res = await attempt(false);
+    return res.transactionHash;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('account sequence mismatch') || msg.includes('incorrect account sequence')) {
+      // refresh client/sequence and retry once
+      const res = await attempt(true);
+      return res.transactionHash;
+    }
+    throw e;
+  }
 }
 
 type SimResult = { return_amount: string } | { returnAmount: string };
