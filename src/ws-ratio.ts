@@ -63,26 +63,31 @@ type TradeZone = {
 };
 
 const BUY_ZIG_ZONES: TradeZone[] = [
-  { min: 1.014, max: 1.015, sizeZig: 1, label: 'BUY_ZIG 1.0140-1.0150', orderId: 'J' },
-  { min: 1.0151, max: 1.018, sizeZig: 1, label: 'BUY_ZIG 1.0151-1.0180', orderId: 'K' },
-  { min: 1.0181, max: 1.02, sizeZig: 1, label: 'BUY_ZIG 1.0181-1.0200', orderId: 'L' },
-  { min: 1.0201, max: 1.022, sizeZig: 1, label: 'BUY_ZIG 1.0201-1.0220', orderId: 'M' },
-  { min: 1.0221, max: 1.024, sizeZig: 1, label: 'BUY_ZIG 1.0221-1.0240', orderId: 'N' },
-  { min: 1.0241, max: 1.026, sizeZig: 1, label: 'BUY_ZIG 1.0241-1.0260', orderId: 'O' },
-  { min: 1.0261, max: 1.028, sizeZig: 1, label: 'BUY_ZIG 1.0261-1.0280', orderId: 'P' },
-  { min: 1.0281, max: 1.03, sizeZig: 1, label: 'BUY_ZIG 1.0281-1.0300', orderId: 'Q' },
+  { min: 1.0148, max: 1.015, sizeZig: 15000, label: 'BUY_ZIG 1.0148-1.0150', orderId: 'M' },
+  { min: 1.0151, max: 1.0159, sizeZig: 15000, label: 'BUY_ZIG 1.0151-1.0159', orderId: 'N' },
+  { min: 1.016, max: 1.0169, sizeZig: 15000, label: 'BUY_ZIG 1.0160-1.0169', orderId: 'O' },
+  { min: 1.017, max: 1.0179, sizeZig: 15000, label: 'BUY_ZIG 1.0170-1.0179', orderId: 'P' },
+  { min: 1.018, max: 1.0189, sizeZig: 15000, label: 'BUY_ZIG 1.0180-1.0189', orderId: 'Q' },
+  { min: 1.019, max: 1.0199, sizeZig: 25000, label: 'BUY_ZIG 1.0190-1.0199', orderId: 'R' },
+  { min: 1.02, max: 1.0209, sizeZig: 25000, label: 'BUY_ZIG 1.0200-1.0209', orderId: 'S' },
+  { min: 1.021, max: 1.0219, sizeZig: 25000, label: 'BUY_ZIG 1.0210-1.0219', orderId: 'T' },
+  { min: 1.022, max: 1.0229, sizeZig: 25000, label: 'BUY_ZIG 1.0220-1.0229', orderId: 'U' },
+  { min: 1.023, max: 1.0239, sizeZig: 25000, label: 'BUY_ZIG 1.0230-1.0239', orderId: 'V' },
 ];
 
 const BUY_STZIG_ZONES: TradeZone[] = [
-  { min: 1.0041, max: 1.007, sizeZig: 1, label: 'BUY_STZIG 1.0041-1.0070', orderId: 'A' },
-  { min: 1.0011, max: 1.004, sizeZig: 1, label: 'BUY_STZIG 1.0011-1.0040', orderId: 'B' },
-  { min: 1.0001, max: 1.001, sizeZig: 1, label: 'BUY_STZIG 1.0001-1.0010', orderId: 'C' },
-  { min: 0.9901, max: 1.0, sizeZig: 1, label: 'BUY_STZIG 0.9901-1.0000', orderId: 'D' },
-  { min: 0.9951, max: 0.99, sizeZig: 1, label: 'BUY_STZIG 0.9951-0.9900', orderId: 'E' },
-  { min: 0.9941, max: 0.995, sizeZig: 1, label: 'BUY_STZIG 0.9941-0.9950', orderId: 'F' },
-  { min: 0.9921, max: 0.994, sizeZig: 1, label: 'BUY_STZIG 0.9921-0.9940', orderId: 'G' },
-  { min: 0.9911, max: 0.992, sizeZig: 1, label: 'BUY_STZIG 0.9911-0.9920', orderId: 'H' },
-  { min: 0.9905, max: 0.991, sizeZig: 1, label: 'BUY_STZIG 0.9905-0.9910', orderId: 'I' },
+  { min: 1.0101, max: 1.011, sizeZig: 15000, label: 'BUY_STZIG 1.0101-1.0110', orderId: 'A' },
+  { min: 1.009, max: 1.01, sizeZig: 15000, label: 'BUY_STZIG 1.0090-1.0100', orderId: 'B' },
+  { min: 1.007, max: 1.008, sizeZig: 15000, label: 'BUY_STZIG 1.0070-1.0080', orderId: 'C' },
+  { min: 1.006, max: 1.007, sizeZig: 15000, label: 'BUY_STZIG 1.0060-1.0070', orderId: 'D' },
+  { min: 1.005, max: 1.006, sizeZig: 15000, label: 'BUY_STZIG 1.0050-1.0060', orderId: 'E' },
+  { min: 1.004, max: 1.005, sizeZig: 25000, label: 'BUY_STZIG 1.0040-1.0050', orderId: 'F' },
+  { min: 1.003, max: 1.004, sizeZig: 25000, label: 'BUY_STZIG 1.0030-1.0040', orderId: 'G' },
+  { min: 1.002, max: 1.003, sizeZig: 25000, label: 'BUY_STZIG 1.0020-1.0030', orderId: 'H' },
+  { min: 1.001, max: 1.002, sizeZig: 25000, label: 'BUY_STZIG 1.0010-1.0020', orderId: 'I' },
+  { min: 1.0, max: 1.001, sizeZig: 25000, label: 'BUY_STZIG 1.0000-1.0010', orderId: 'J' },
+  { min: 0.99, max: 0.999, sizeZig: 50000, label: 'BUY_STZIG 0.9900-0.9990', orderId: 'K' },
+  { min: 0.98, max: 0.99, sizeZig: 50000, label: 'BUY_STZIG 0.9800-0.9900', orderId: 'L' },
 ];
 
 const EPSILON = 1e-9;
