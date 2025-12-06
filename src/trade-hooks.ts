@@ -95,7 +95,8 @@ function getHourBucket(date = new Date()): string {
   const month = pad(date.getUTCMonth() + 1);
   const day = pad(date.getUTCDate());
   const hour = pad(date.getUTCHours());
-  return `${year}-${month}-${day}T${hour}`;
+  const minute = pad(Math.floor(date.getUTCMinutes() / 5) * 5);
+  return `${year}-${month}-${day}T${hour}:${minute}`;
 }
 
 function splitBucket(bucket: string) {
