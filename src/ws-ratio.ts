@@ -76,6 +76,7 @@ const BUY_ZIG_ZONES: TradeZone[] = [
 
 
 const BUY_STZIG_ZONES: TradeZone[] = [
+  { min: 1.0121, max: 1.0124, sizeZig: 5000, label:  'BUY_STZIG 1.0121-1.0124', orderId: 'N2'},
   { min: 1.0111, max: 1.0115, sizeZig: 10000, label: 'BUY_STZIG 1.0111-1.0115', orderId: 'N' },
   { min: 1.0116, max: 1.0120, sizeZig: 10000, label: 'BUY_STZIG 1.0116-1.0120', orderId: 'A' },
   { min: 1.0101, max: 1.0110, sizeZig: 15000, label: 'BUY_STZIG 1.0101-1.0110', orderId: 'B' },
@@ -90,7 +91,7 @@ const BUY_STZIG_ZONES: TradeZone[] = [
   { min: 1.0000, max: 1.0010, sizeZig: 30000, label: 'BUY_STZIG 1.0000-1.0010', orderId: 'K' },
   { min: 0.9900, max: 0.9990, sizeZig: 50000, label: 'BUY_STZIG 0.9900-0.9990', orderId: 'L' },
   { min: 0.9800, max: 0.9900, sizeZig: 50000, label: 'BUY_STZIG 0.9800-0.9900', orderId: 'M' },
-  { min: 0.9100, max: 0.9400, sizeZig: 100000, label: 'BUY_STZIG 0.9100-0.9400', orderId: 'M2' },
+  { min: 0.9100, max: 0.9400, sizeZig: 100000, label: 'BUY_STZIG 0.9100-0.9400', orderId: 'Special Order'},
 ];
 
 const EPSILON = 1e-9;
