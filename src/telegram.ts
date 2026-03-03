@@ -91,43 +91,64 @@ async function postJson(url: string, body: any): Promise<any> {
   return data;
 }
 
+async function loadAllChatIds(): Promise<string[]> {
+  const ids = new Set<string>();
+  if (DEFAULT_CHAT_ID) ids.add(DEFAULT_CHAT_ID);
+  try {
+    const { promises: fsp } = await import('fs');
+    const content = await fsp.readFile(SUBSCRIBERS_FILE, 'utf8');
+    for (const line of content.split(/\r?\n/)) {
+      const cid = line.trim().split(',')[0];
+      if (cid) ids.add(cid);
+    }
+  } catch {}
+  return [...ids];
+}
+
 export async function notifyTrade(
   text: string,
   opts?: { chatId?: string; txHash?: string }
 ): Promise<void> {
   try {
     if (!BOT_TOKEN) return;
-    let cid = opts?.chatId || DEFAULT_CHAT_ID;
-    // Try to load first subscriber if no default chat id yet
-    if (!cid) {
-      try {
-        const { promises: fsp } = await import('fs');
-        const content = await fsp.readFile(SUBSCRIBERS_FILE, 'utf8');
-        const first = content.split(/\r?\n/).find((l) => l.trim().length > 0);
-        if (first) cid = first.split(',')[0];
-      } catch {}
+
+    // If a specific chatId is provided (e.g. /start reply), send only to that
+    // Otherwise broadcast to ALL subscribers + DEFAULT_CHAT_ID
+    const targets: string[] = opts?.chatId
+      ? [opts.chatId]
+      : await loadAllChatIds();
+
+    if (targets.length === 0) {
+      console.warn('[tg] no subscribers to notify');
+      return;
     }
-    if (!cid) return; // no destination yet
+
+    console.log(`[tg] broadcasting to ${targets.length} chat(s): ${targets.join(', ')}`);
+
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-    const payload: any = {
-      chat_id: cid,
-      text,
-    };
-    if (opts?.txHash) {
-      payload.reply_markup = {
-        inline_keyboard: [
-          [
-            {
-              text: 'View on Zigscan',
-              url: `https://www.zigscan.org/tx/${opts.txHash}`,
-            },
+    const replyMarkup = opts?.txHash
+      ? {
+          inline_keyboard: [
+            [
+              {
+                text: 'View on Zigscan',
+                url: `https://www.zigscan.org/tx/${opts.txHash}`,
+              },
+            ],
           ],
-        ],
-      };
+        }
+      : undefined;
+
+    for (const cid of targets) {
+      try {
+        const payload: any = { chat_id: cid, text };
+        if (replyMarkup) payload.reply_markup = replyMarkup;
+        await postJson(url, payload);
+      } catch (e) {
+        console.error(`[tg] failed to send to ${cid}:`, e instanceof Error ? e.message : e);
+      }
     }
-    await postJson(url, payload);
   } catch (e) {
-    // silent to avoid crashing trading loop
     // eslint-disable-next-line no-console
     console.error('[tg] notify failed:', e instanceof Error ? e.message : e);
   }
@@ -139,6 +160,9 @@ export function startTelegramBot(getLatest: () => number | undefined, thresholdG
     return;
   }
   let offset = 0;
+  let consecutiveErrors = 0;
+  let lastErrorMsg = '';
+
   // switch to long polling by deleting webhook if present
   (async () => {
     try {
@@ -148,10 +172,10 @@ export function startTelegramBot(getLatest: () => number | undefined, thresholdG
       console.log('[tg] Webhook cleared; using long polling');
     } catch (e) {
       console.error('[tg] failed to delete webhook:', e instanceof Error ? e.message : e);
+      console.warn('[tg] ⚠ Cannot reach api.telegram.org — check VPN/proxy/network');
     }
   })();
 
-  
   async function pollOnce() {
     try {
       const fetchFn = await getFetch();
@@ -160,6 +184,14 @@ export function startTelegramBot(getLatest: () => number | undefined, thresholdG
       const res = await fetchFn(`${url}?${qs}`);
       const data = await res.json();
       if (!data.ok) throw new Error(data.description || 'getUpdates failed');
+
+      // Reset error tracking on success
+      if (consecutiveErrors > 0) {
+        console.log(`[tg] ✅ Telegram API reconnected after ${consecutiveErrors} failures`);
+      }
+      consecutiveErrors = 0;
+      lastErrorMsg = '';
+
       const updates: any[] = data.result || [];
       for (const u of updates) {
         offset = Math.max(offset, u.update_id || 0);
@@ -175,6 +207,8 @@ export function startTelegramBot(getLatest: () => number | undefined, thresholdG
         if (text === '/start' || text === 'start' || text === 'Start') {
           // persist subscriber
           await appendSubscriber(chatId, username);
+          const allIds = await loadAllChatIds();
+          console.log(`[tg] 📥 Subscriber registered: ${chatId} (${username || 'no username'}) — total: ${allIds.length}`);
           const p = getLatest();
           const thr = thresholdGetter ? thresholdGetter() : undefined;
           const thrLine = thr ? `\nTrigger band: ${thr}` : '';
@@ -184,29 +218,44 @@ export function startTelegramBot(getLatest: () => number | undefined, thresholdG
           await notifyTrade(body, { chatId });
         } else if (text === '/stop' || text.toLowerCase() === 'stop') {
           await removeSubscriber(chatId);
+          console.log(`[tg] 📤 Subscriber removed: ${chatId}`);
           await notifyTrade('Notifications stopped. Send /start to resume.', { chatId });
         }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      consecutiveErrors++;
+
       if (msg.includes('terminated by other getUpdates request')) {
-        // Another in-flight request from this process; will retry after backoff
         console.warn('[tg] concurrent poll avoided');
-      } else {
-        console.error('[tg] polling error:', msg);
+      } else if (msg !== lastErrorMsg || consecutiveErrors === 1) {
+        // Only log on first occurrence or when error message changes
+        console.error(`[tg] polling error: ${msg} (will retry in ${Math.min(consecutiveErrors * 5, 60)}s)`);
+        if (consecutiveErrors === 1) {
+          console.warn('[tg] ⚠ If this persists, Telegram API may be blocked — try VPN or deploy to a VPS');
+        }
+        lastErrorMsg = msg;
+      } else if (consecutiveErrors % 20 === 0) {
+        // Periodic reminder every ~20 failures
+        console.warn(`[tg] still failing (${consecutiveErrors} consecutive errors): ${msg}`);
       }
     }
   }
-  // Single in-flight long-poll loop
+
+  // Single in-flight long-poll loop with exponential backoff
   let polling = false;
   const loop = async () => {
-    if (polling) return; // avoid overlap
+    if (polling) return;
     polling = true;
     try {
       await pollOnce();
     } finally {
       polling = false;
-      setTimeout(loop, 500); // small backoff between polls
+      // Backoff: 500ms normally, up to 60s on consecutive errors
+      const backoff = consecutiveErrors > 0
+        ? Math.min(consecutiveErrors * 5000, 60_000)
+        : 500;
+      setTimeout(loop, backoff);
     }
   };
   void loop();
