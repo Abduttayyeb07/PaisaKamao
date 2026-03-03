@@ -5,6 +5,43 @@ import { notifyTrade } from './telegram';
 import { promises as fs, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 
+function humanizeError(raw: unknown): string {
+  const msg = raw instanceof Error ? raw.message : String(raw);
+
+  // Insufficient funds
+  const fundsMatch = msg.match(/spendable balance (\d+)(\w+) is smaller than (\d+)\2/);
+  if (fundsMatch) {
+    const available = Number(fundsMatch[1]) / 1e6;
+    const needed = Number(fundsMatch[3]) / 1e6;
+    const denom = fundsMatch[2] === 'uzig' ? 'ZIG' : 'stZIG';
+    return `💰 Insufficient ${denom} — have ${available.toFixed(2)}, need ${needed.toFixed(2)} (short ${(needed - available).toFixed(2)})`;
+  }
+
+  // Max spread / slippage
+  if (msg.includes('max spread') || msg.includes('Max spread')) {
+    return '📊 Slippage too high — spread exceeded max tolerance';
+  }
+
+  // Timeout
+  if (msg.includes('timed out') || msg.includes('timeout') || msg.includes('ETIMEDOUT')) {
+    return '⏱ Transaction timed out — RPC may be slow';
+  }
+
+  // Sequence mismatch (should be auto-retried, but just in case)
+  if (msg.includes('account sequence mismatch')) {
+    return '🔄 Sequence mismatch — tx was stale, retry needed';
+  }
+
+  // Gas
+  if (msg.includes('out of gas')) {
+    return '⛽ Out of gas — increase GAS_PRICE in .env';
+  }
+
+  // Fallback: truncate the raw message
+  const clean = msg.replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim();
+  return clean.length > 120 ? clean.slice(0, 117) + '...' : clean;
+}
+
 export type TradeContext = {
   priceUzigPerStzig: number;
   rawPriceUzigPerStzig?: number;
@@ -374,13 +411,16 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
   } catch (e) {
     console.error('[BUY] failed:', e instanceof Error ? e.message : e);
     const errLine = [
-      `❌ BUY failed (Order ${ctx.orderId ?? '??'})`,
-      `Price: ${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote}`,
-      `Offer: ${formatZigAmount(offerAmount, UZIG_EXP)} ZIG`,
-      `Slot: ${bucketSlot} — ${bucketDate}`,
-      `Error: ${e instanceof Error ? e.message : String(e)}`,
+      `❌ BUY STZIG Failed`,
+      ``,
+      `📋 Order: ${ctx.orderId ?? '??'} (${ctx.rangeLabel ?? 'unknown'})`,
+      `💹 Price: ${ctx.priceUzigPerStzig.toFixed(6)}`,
+      `💸 Offer: ${formatZigAmount(offerAmount, UZIG_EXP)} ZIG`,
+      `🕐 Slot: ${bucketSlot} — ${bucketDate}`,
+      ``,
+      `⚠️ ${humanizeError(e)}`,
     ]
-      .filter(Boolean)
+      .filter((l) => l !== undefined)
       .join('\n');
     await notifyTrade(errLine);
   }
@@ -452,13 +492,16 @@ export async function onSell(ctx: TradeContext): Promise<void> {
   } catch (e) {
     console.error('[SELL] failed:', e instanceof Error ? e.message : e);
     const errLine = [
-      `❌ SELL failed (Order ${ctx.orderId ?? '??'})`,
-      `Price: ${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote}`,
-      `Offer: ${formatZigAmount(offerAmount, STZIG_EXP)} ZIG`,
-      `Slot: ${bucketSlot} — ${bucketDate}`,
-      `Error: ${e instanceof Error ? e.message : String(e)}`,
+      `❌ SELL STZIG Failed`,
+      ``,
+      `📋 Order: ${ctx.orderId ?? '??'} (${ctx.rangeLabel ?? 'unknown'})`,
+      `💹 Price: ${ctx.priceUzigPerStzig.toFixed(6)}`,
+      `💸 Offer: ${formatZigAmount(offerAmount, STZIG_EXP)} ZIG`,
+      `🕐 Slot: ${bucketSlot} — ${bucketDate}`,
+      ``,
+      `⚠️ ${humanizeError(e)}`,
     ]
-      .filter(Boolean)
+      .filter((l) => l !== undefined)
       .join('\n');
     await notifyTrade(errLine);
   }
