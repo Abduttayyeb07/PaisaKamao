@@ -6,7 +6,7 @@ import { promises as fs, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 
 function humanizeError(raw: unknown): string {
-  const msg = raw instanceof Error ? raw.message : String(raw);
+  const msg = extractErrorDetails(raw).summary;
 
   // Insufficient funds
   const fundsMatch = msg.match(/spendable balance (\d+)(\w+) is smaller than (\d+)\2/);
@@ -40,6 +40,84 @@ function humanizeError(raw: unknown): string {
   // Fallback: truncate the raw message
   const clean = msg.replace(/\[.*?\]/g, '').replace(/\s+/g, ' ').trim();
   return clean.length > 120 ? clean.slice(0, 117) + '...' : clean;
+}
+
+type ErrorDetails = {
+  summary: string;
+  statusCode?: number;
+  statusText?: string;
+  bodyText?: string;
+  cause?: string;
+  stack?: string;
+};
+
+function extractErrorDetails(raw: unknown): ErrorDetails {
+  const fallback = raw instanceof Error ? raw.message : String(raw);
+  const anyRaw = raw as any;
+  const response = anyRaw?.response;
+  const cause = anyRaw?.cause;
+  const details: ErrorDetails = {
+    summary: fallback,
+    statusCode:
+      typeof response?.status === 'number'
+        ? response.status
+        : typeof anyRaw?.status === 'number'
+          ? anyRaw.status
+          : undefined,
+    statusText:
+      typeof response?.statusText === 'string'
+        ? response.statusText
+        : typeof anyRaw?.statusText === 'string'
+          ? anyRaw.statusText
+          : undefined,
+    bodyText:
+      typeof response?.data === 'string'
+        ? response.data
+        : typeof anyRaw?.body === 'string'
+          ? anyRaw.body
+          : typeof anyRaw?.bodyText === 'string'
+            ? anyRaw.bodyText
+            : undefined,
+    cause:
+      cause instanceof Error
+        ? cause.message
+        : typeof cause === 'string'
+          ? cause
+          : undefined,
+    stack: raw instanceof Error ? raw.stack : undefined,
+  };
+
+  if (details.statusCode !== undefined) {
+    const statusBits = [`HTTP ${details.statusCode}`];
+    if (details.statusText) statusBits.push(details.statusText);
+    details.summary = `${statusBits.join(' ')}${fallback ? ` | ${fallback}` : ''}`;
+  }
+
+  return details;
+}
+
+function formatErrorForLog(raw: unknown): string[] {
+  const details = extractErrorDetails(raw);
+  const lines = [`summary=${details.summary}`];
+  if (details.statusCode !== undefined) lines.push(`status=${details.statusCode}`);
+  if (details.statusText) lines.push(`statusText=${details.statusText}`);
+  if (details.cause) lines.push(`cause=${details.cause}`);
+  if (details.bodyText) lines.push(`body=${details.bodyText}`);
+  if (details.stack) lines.push(`stack=${details.stack}`);
+  return lines;
+}
+
+function formatErrorForNotification(raw: unknown): string[] {
+  const details = extractErrorDetails(raw);
+  const lines = [`⚠️ ${humanizeError(raw)}`];
+  if (details.statusCode !== undefined) {
+    lines.push(
+      `🌐 RPC Status: ${details.statusCode}${details.statusText ? ` ${details.statusText}` : ''}`
+    );
+  }
+  if (details.cause) lines.push(`🧩 Cause: ${details.cause}`);
+  if (details.bodyText) lines.push(`📄 Body: ${details.bodyText.slice(0, 180)}`);
+  return lines;
 }
 
 export type TradeContext = {
@@ -259,6 +337,9 @@ function toBaseUnits(amount: number, decimals: number): string {
 async function executeSwap(offerDenom: string, offerAmount: string) {
   if (!POOL_CONTRACT) throw new Error('Missing POOL_CONTRACT');
   const attempt = async (refresh: boolean) => {
+    console.log(
+      `[swap] submitting ${offerAmount} ${offerDenom} refresh=${refresh} rpc=${HTTP_RPC} pool=${POOL_CONTRACT}`
+    );
     const { client, address } = await getClient(refresh);
     const msg = {
       swap: {
@@ -271,17 +352,26 @@ async function executeSwap(offerDenom: string, offerAmount: string) {
       },
     } as const;
     const funds = coins(offerAmount, offerDenom);
+    console.log(
+      `[swap] execute sender=${address} maxSpread=${MAX_SPREAD.toFixed(3)} funds=${offerAmount}${offerDenom}`
+    );
     return client.execute(address, POOL_CONTRACT, msg, 'auto', undefined, funds);
   };
 
   try {
     const res = await attempt(false);
+    console.log(`[swap] tx accepted hash=${res.transactionHash}`);
     return res.transactionHash;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[swap] initial attempt failed');
+    for (const line of formatErrorForLog(e)) {
+      console.error(`[swap] ${line}`);
+    }
+    const msg = extractErrorDetails(e).summary;
     if (msg.includes('account sequence mismatch') || msg.includes('incorrect account sequence')) {
-      // refresh client/sequence and retry once
+      console.warn('[swap] retrying with refreshed signer after sequence mismatch');
       const res = await attempt(true);
+      console.log(`[swap] retry accepted hash=${res.transactionHash}`);
       return res.transactionHash;
     }
     throw e;
@@ -371,7 +461,7 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
     }
   }
   console.log(
-    `[BUY] price=${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote} offer ${offerAmount} UZIG`
+    `[BUY] price=${ctx.priceUzigPerStzig.toFixed(6)} raw=${ctx.rawPriceUzigPerStzig?.toFixed(6) ?? 'n/a'}${rangeNote} offer=${offerAmount} ${UZIG_DENOM} desiredZig=${desiredZig} bucket=${bucket}${note ? ` note="${note}"` : ''}`
   );
   if (!PRIVATE_KEY) {
     console.log('[BUY] dry run: missing PRIVATE_KEY, swap skipped.');
@@ -409,7 +499,10 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
       tx
     );
   } catch (e) {
-    console.error('[BUY] failed:', e instanceof Error ? e.message : e);
+    console.error('[BUY] failed');
+    for (const line of formatErrorForLog(e)) {
+      console.error(`[BUY] ${line}`);
+    }
     const errLine = [
       `❌ BUY STZIG Failed`,
       ``,
@@ -418,7 +511,7 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
       `💸 Offer: ${formatZigAmount(offerAmount, UZIG_EXP)} ZIG`,
       `🕐 Slot: ${bucketSlot} — ${bucketDate}`,
       ``,
-      `⚠️ ${humanizeError(e)}`,
+      ...formatErrorForNotification(e),
     ]
       .filter((l) => l !== undefined)
       .join('\n');
@@ -452,7 +545,7 @@ export async function onSell(ctx: TradeContext): Promise<void> {
     }
   }
   console.log(
-    `[SELL] price=${ctx.priceUzigPerStzig.toFixed(6)}${rangeNote} offer ${offerAmount} STZIG`
+    `[SELL] price=${ctx.priceUzigPerStzig.toFixed(6)} raw=${ctx.rawPriceUzigPerStzig?.toFixed(6) ?? 'n/a'}${rangeNote} offer=${offerAmount} ${STZIG_DENOM} desiredZig=${desiredZig} bucket=${bucket}${note ? ` note="${note}"` : ''}`
   );
   if (!PRIVATE_KEY) {
     console.log('[SELL] dry run: missing PRIVATE_KEY, swap skipped.');
@@ -490,7 +583,10 @@ export async function onSell(ctx: TradeContext): Promise<void> {
       tx
     );
   } catch (e) {
-    console.error('[SELL] failed:', e instanceof Error ? e.message : e);
+    console.error('[SELL] failed');
+    for (const line of formatErrorForLog(e)) {
+      console.error(`[SELL] ${line}`);
+    }
     const errLine = [
       `❌ SELL STZIG Failed`,
       ``,
@@ -499,7 +595,7 @@ export async function onSell(ctx: TradeContext): Promise<void> {
       `💸 Offer: ${formatZigAmount(offerAmount, STZIG_EXP)} ZIG`,
       `🕐 Slot: ${bucketSlot} — ${bucketDate}`,
       ``,
-      `⚠️ ${humanizeError(e)}`,
+      ...formatErrorForNotification(e),
     ]
       .filter((l) => l !== undefined)
       .join('\n');
