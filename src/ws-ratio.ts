@@ -63,9 +63,10 @@ type TradeZone = {
 };
 
 const BUY_ZIG_ZONES: TradeZone[] = [
-{ min: 1.038, max: 1.0385, sizeZig: 1501, label: 'BUY_ZIG 1.024-1.0245', orderId: 'O1' },
-{ min: 1.0385, max: 1.039, sizeZig: 5002, label: 'BUY_ZIG 1.0245-1.025', orderId: 'O1' },
-{ min: 1.039, max: 1.040, sizeZig: 10003, label: 'BUY_ZIG 1.025-1.026', orderId: 'O2' },
+  { min: 1.040, max: 1.06, sizeZig: 13006, label: 'BUY_ZIG 1.040-1.06', orderId: 'O1B' },
+  { min: 1.038, max: 1.0385, sizeZig: 1501, label: 'BUY_ZIG 1.024-1.0245', orderId: 'O1' },
+  { min: 1.0385, max: 1.039, sizeZig: 5002, label: 'BUY_ZIG 1.0245-1.025', orderId: 'O1' },
+  { min: 1.039, max: 1.040, sizeZig: 10003, label: 'BUY_ZIG 1.025-1.026', orderId: 'O2' },
   { min: 1.040, max: 1.041, sizeZig: 15004, label: 'BUY_ZIG 1.026-1.027', orderId: 'O3' },
 { min: 1.041, max: 1.042, sizeZig: 15005, label: 'BUY_ZIG 1.027-1.028', orderId: 'P' },
 { min: 1.042, max: 1.043, sizeZig: 25006, label: 'BUY_ZIG 1.028-1.029', orderId: 'Q' },
@@ -81,8 +82,9 @@ const BUY_ZIG_ZONES: TradeZone[] = [
 
 
 const BUY_STZIG_ZONES: TradeZone[] = [
- { min: 1.035, max: 1.0355, sizeZig: 2501, label: 'BUY_STZIG 1.0235-1.024', orderId: 'N9' },
- { min: 1.0344, max: 1.035, sizeZig: 5002, label: 'BUY_STZIG 1.023-1.0235', orderId: 'N9' },
+  { min: 1.0, max: 1.0362, sizeZig: 15007, label: 'BUY_STZIG 1.00-1.0362', orderId: 'N0' },
+  { min: 1.035, max: 1.0355, sizeZig: 2501, label: 'BUY_STZIG 1.0235-1.024', orderId: 'N9' },
+  { min: 1.0344, max: 1.035, sizeZig: 5002, label: 'BUY_STZIG 1.023-1.0235', orderId: 'N9' },
  { min: 1.0342, max: 1.0344, sizeZig: 8003, label: 'BUY_STZIG 1.022-1.023', orderId: 'N9' },
  { min: 1.034, max: 1.0342, sizeZig: 10104, label: 'BUY_STZIG 1.021-1.022', orderId: 'N8' },
  { min: 1.033, max: 1.034, sizeZig: 12005, label: 'BUY_STZIG 1.020-1.021', orderId: 'N7' },
