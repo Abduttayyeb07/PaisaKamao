@@ -51,11 +51,27 @@ type ErrorDetails = {
   stack?: string;
 };
 
+function explainRpcStatus(statusCode: number): string | undefined {
+  switch (statusCode) {
+    case 521:
+      return 'RPC gateway could not reach the origin server. The provider endpoint was down, refused, or blocked.';
+    case 522:
+      return 'RPC gateway reached the edge, but the origin timed out before responding. This is usually an upstream RPC timeout.';
+    case 523:
+      return 'RPC origin was unreachable from the gateway. This is usually a provider routing or DNS problem.';
+    case 524:
+      return 'RPC gateway connected but the origin took too long to finish the request.';
+    default:
+      return undefined;
+  }
+}
+
 function extractErrorDetails(raw: unknown): ErrorDetails {
   const fallback = raw instanceof Error ? raw.message : String(raw);
   const anyRaw = raw as any;
   const response = anyRaw?.response;
   const cause = anyRaw?.cause;
+  const statusFromMessage = fallback.match(/\bresponse:\s*(\d{3})\b/i)?.[1];
   const details: ErrorDetails = {
     summary: fallback,
     statusCode:
@@ -63,6 +79,8 @@ function extractErrorDetails(raw: unknown): ErrorDetails {
         ? response.status
         : typeof anyRaw?.status === 'number'
           ? anyRaw.status
+          : statusFromMessage
+            ? Number(statusFromMessage)
           : undefined,
     statusText:
       typeof response?.statusText === 'string'
@@ -101,6 +119,10 @@ function formatErrorForLog(raw: unknown): string[] {
   const lines = [`summary=${details.summary}`];
   if (details.statusCode !== undefined) lines.push(`status=${details.statusCode}`);
   if (details.statusText) lines.push(`statusText=${details.statusText}`);
+  if (details.statusCode !== undefined) {
+    const reason = explainRpcStatus(details.statusCode);
+    if (reason) lines.push(`reason=${reason}`);
+  }
   if (details.cause) lines.push(`cause=${details.cause}`);
   if (details.bodyText) lines.push(`body=${details.bodyText}`);
   if (details.stack) lines.push(`stack=${details.stack}`);
@@ -114,6 +136,8 @@ function formatErrorForNotification(raw: unknown): string[] {
     lines.push(
       `🌐 RPC Status: ${details.statusCode}${details.statusText ? ` ${details.statusText}` : ''}`
     );
+    const reason = explainRpcStatus(details.statusCode);
+    if (reason) lines.push(`📝 Reason: ${reason}`);
   }
   if (details.cause) lines.push(`🧩 Cause: ${details.cause}`);
   if (details.bodyText) lines.push(`📄 Body: ${details.bodyText.slice(0, 180)}`);
@@ -134,9 +158,8 @@ export type TradeContext = {
   orderId?: string;
 };
 
-const HTTP_RPC = process.env.HTTP_RPC || 'https://zigchain-mainnet-rpc-sanatry-01.wickhub.cc';
+const HTTP_RPC = process.env.HTTP_RPC || 'https://zigchain-mainnet.zigscan.net';
 const PRIVATE_KEY = process.env.PRIVATE_KEY || '';
-const WALLET_ADDRESS = process.env.WALLET_ADDRESS || '';
 const FEE_DENOM = process.env.FEE_DENOM || 'uzig';
 const GAS_PRICE = Number(process.env.GAS_PRICE || '0.025');
 
@@ -428,8 +451,9 @@ async function simulateProjection(
     if (denomSt === 0n) return undefined;
     return Number(ctx.uzig + offerAmount) / Number(denomSt);
   } catch (e) {
-    if (DEBUG_SIM) {
-      console.warn('[sim] projection failed:', e instanceof Error ? e.message : String(e));
+    console.warn('[sim] projection failed');
+    for (const line of formatErrorForLog(e)) {
+      console.warn(`[sim] ${line}`);
     }
     return undefined;
   }
