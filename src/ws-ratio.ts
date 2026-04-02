@@ -4,7 +4,7 @@ import { onBuy, onSell } from './trade-hooks';
 import { startTelegramBot } from './telegram';
 
 // ---------- CONFIG ----------
-const RPC_BASE = process.env.RPC_BASE || 'wss://zigchain-mainnet.zigscan.net';
+const RPC_BASE = process.env.RPC_BASE || 'wss://cryptocomics-rpc.wickhub.cc';
 const WS_URL = RPC_BASE.endsWith('/websocket') ? RPC_BASE : `${RPC_BASE}/websocket`;
 
 const POOL_CONTRACT =
