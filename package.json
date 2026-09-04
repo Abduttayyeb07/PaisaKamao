@@ -10,11 +10,10 @@
     "start": "node dist/ws-ratio.js"
   },
   "dependencies": {
-    "@cosmjs/cosmwasm-stargate": "^0.32.4",
-    "@cosmjs/proto-signing": "^0.32.4",
-    "@cosmjs/stargate": "^0.32.4",
+    "@cosmjs/cosmwasm-stargate": "^0.38.1",
+    "@cosmjs/proto-signing": "^0.38.1",
+    "@cosmjs/stargate": "^0.38.1",
     "dotenv": "^16.4.5",
-    "i": "^0.3.7",
     "node-fetch": "^3.3.2",
     "ws": "^8.17.0"
   },
