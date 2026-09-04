@@ -70,7 +70,7 @@ const BUY_ZIG_ZONES: TradeZone[] = [
 
 
 const BUY_STZIG_ZONES: TradeZone[] = [
-  { min: 1.065, max: 1.066, sizeZig: 2000, label: 'BUY_STZIG 1.014-1.015', orderId: 'N1' }, 
+  { min: 1.065, max: 1.066, sizeZig: 2000, label: 'BUY_STZIG 1.065-1.066', orderId: 'N1' }, 
 ];
 
 
