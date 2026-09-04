@@ -15,6 +15,11 @@ services:
       DASHBOARD_HOST: 0.0.0.0
       DASHBOARD_PORT: "3030"
 
+    # Published on all interfaces on purpose: the dashboard is reachable at
+    # http://<server-ip>:3030 from any browser. It has NO authentication, so
+    # anyone who knows the IP can read the wallet address, positions and PnL.
+    # To make it private instead, change this to "127.0.0.1:3030:3030" and
+    # reach it over an SSH tunnel.
     ports:
       - "3030:3030"
 
