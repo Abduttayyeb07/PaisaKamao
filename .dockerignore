@@ -1,0 +1,24 @@
+node_modules
+dist
+
+.git
+.gitignore
+.gitattributes
+
+# Secrets - PRIVATE_KEY and TELEGRAM_BOT_TOKEN must never be baked into a layer.
+# Pass configuration in at run time with --env-file or compose's env_file.
+.env
+
+# Runtime state belongs on the mounted volume, not in the image.
+trade-history.log
+trade-actions.csv
+zone-state.json
+subscribers.csv
+*.log
+
+archive/
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md

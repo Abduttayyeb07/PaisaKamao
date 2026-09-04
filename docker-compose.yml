@@ -1,0 +1,31 @@
+services:
+  bot:
+    build: .
+    image: zig-ws-ratio-bot:latest
+    container_name: zig-ws-ratio-bot
+    restart: unless-stopped
+
+    # Configuration comes from .env at run time; it is never copied into the image.
+    env_file:
+      - .env
+
+    # These win over anything in .env - the dashboard must not bind to loopback
+    # inside the container or the published port will refuse connections.
+    environment:
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PORT: "3030"
+
+    ports:
+      - "3030:3030"
+
+    volumes:
+      - bot-data:/app/data
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot-data:

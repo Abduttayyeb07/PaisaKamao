@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { readFileSync, statSync } from 'fs';
-import { extname, join, resolve } from 'path';
+import { extname, join, resolve, sep } from 'path';
 import { getDashboardSnapshot, recordRuntimeError } from './metrics';
 
 const MIME_TYPES: Record<string, string> = {
@@ -24,7 +24,9 @@ function serveStatic(res: ServerResponse, pathname: string): void {
   const requested = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const filePath = resolve(publicRoot, requested);
 
-  if (filePath !== publicRoot && !filePath.startsWith(publicRoot + '\\')) {
+  // Use the platform separator so the traversal guard also works on Linux
+  // (in a container), not just on Windows.
+  if (filePath !== publicRoot && !filePath.startsWith(publicRoot + sep)) {
     sendJson(res, 403, { error: 'Forbidden' });
     return;
   }
