@@ -2,6 +2,8 @@ import 'dotenv/config';
 import WebSocket from 'ws';
 import { onBuy, onSell } from './trade-hooks';
 import { startTelegramBot } from './telegram';
+import { configureMetrics, recordPoolUpdate, recordRuntimeError, setConnectionStatus } from './metrics';
+import { startDashboardServer } from './dashboard-server';
 
 // ---------- CONFIG ----------
 const RPC_BASE = process.env.RPC_BASE || 'wss://cryptocomics-rpc.wickhub.cc';
@@ -63,29 +65,12 @@ type TradeZone = {
 };
 
 const BUY_ZIG_ZONES: TradeZone[] = [
-  { min: 1.0465, max: 1.048, sizeZig: 5005, label: 'BUY_ZIG 1.027-1.028', orderId: 'P' },
-  { min: 1.048, max: 1.050, sizeZig: 7006, label: 'BUY_ZIG 1.028-1.029', orderId: 'Q' },
-  { min: 1.050, max: 1.052, sizeZig: 15008, label: 'BUY_ZIG 1.030-1.031', orderId: 'S' },
-  { min: 1.052, max: 1.054, sizeZig: 15009, label: 'BUY_ZIG 1.031-1.032', orderId: 'T' },
-  { min: 1.054, max: 1.056, sizeZig: 30010, label: 'BUY_ZIG 1.032-1.033', orderId: 'U' },
-  { min: 1.056, max: 1.058, sizeZig: 30011, label: 'BUY_ZIG 1.033-1.034', orderId: 'V' },
-  { min: 1.058, max: 1.060, sizeZig: 50012, label: 'BUY_ZIG 1.034-1.040', orderId: 'X1'},
-  { min: 1.060, max: 1.07, sizeZig: 50013, label: 'BUY_ZIG 1.040-1.06', orderId: 'X2' },
-  { min: 1.070, max: 1.1, sizeZig: 90014, label: 'BUY_ZIG 1.06-1.1', orderId: 'X3' },
-{ min: 1.1, max: 1.2, sizeZig: 99015, label: 'BUY_ZIG 1.09-1.2', orderId: 'X4' },
+  { min: 1.055, max: 1.056, sizeZig: 2000, label: 'BUY_ZIG 1.055-1.056', orderId: 'P' },
 ];
 
 
 const BUY_STZIG_ZONES: TradeZone[] = [
-  { min: 1.043, max: 1.044, sizeZig: 5010, label: 'BUY_STZIG 1.014-1.015', orderId: 'N1' }, 
-  { min: 1.040, max: 1.043, sizeZig: 20011, label: 'BUY_STZIG 1.013-1.0140', orderId: 'N' },
-  { min: 1.035, max: 1.040, sizeZig: 40012, label: 'BUY_STZIG 1.0116-1.0120', orderId: 'A' },
-  { min: 1.02, max: 1.035, sizeZig: 55025, label: 'BUY_STZIG 1.0020-1.0030', orderId: 'I' },
-  { min: 1.01, max: 1.02, sizeZig: 66026, label: 'BUY_STZIG 1.0010-1.0020', orderId: 'J' },
-  { min: 1.0, max: 1.01, sizeZig: 77027, label: 'BUY_STZIG 1.0000-1.0010', orderId: 'K' },
-  { min: 0.90, max: 0.999, sizeZig: 88000, label: 'BUY_STZIG 0.9900-0.9990', orderId: 'L' },
-  { min: 0.81, max: 0.99, sizeZig: 50000, label: 'BUY_STZIG 0.9800-0.9900', orderId: 'M' },
-  { min: 0.81, max: 0.94, sizeZig: 100000, label: 'BUY_STZIG 0.9800-0.9900', orderId: 'N2' },
+  { min: 1.065, max: 1.066, sizeZig: 2000, label: 'BUY_STZIG 1.014-1.015', orderId: 'N1' }, 
 ];
 
 
@@ -195,15 +180,23 @@ class TendermintWS {
   }
 
   private connect() {
-    this.ws = new WebSocket(this.url);
-    this.ws.on('open', () => this.onOpen());
-    this.ws.on('message', (data) => this.onMessage(data));
-    this.ws.on('error', (err) => this.onError(err));
-    this.ws.on('close', () => this.onClose());
+    try {
+      this.ws = new WebSocket(this.url);
+      this.ws.on('open', () => this.onOpen());
+      this.ws.on('message', (data) => this.onMessage(data));
+      this.ws.on('error', (err) => this.onError(err));
+      this.ws.on('close', () => this.onClose());
+    } catch (error) {
+      recordRuntimeError('WebSocket connection failed', error);
+      setConnectionStatus('reconnecting');
+      clearTimeout(this.reconnectTimer as any);
+      this.reconnectTimer = setTimeout(() => this.connect(), 2000);
+    }
   }
 
   private onOpen() {
     this.connected = true;
+    setConnectionStatus('connected');
     console.log('Connected:', this.url);
     this.subscribe(QUERY);
     this.startHeartbeat();
@@ -228,11 +221,13 @@ class TendermintWS {
   }
 
   private onError(err: any) {
+    recordRuntimeError('WebSocket error', err);
     console.error('WS error:', err?.message || err);
   }
 
   private onClose() {
     this.connected = false;
+    setConnectionStatus('reconnecting');
     this.stopHeartbeat();
     console.log('Disconnected. Reconnecting in 2s...');
     clearTimeout(this.reconnectTimer as any);
@@ -243,8 +238,13 @@ class TendermintWS {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const id = String(this.nextId++);
     const payload = { jsonrpc: '2.0', id, ...obj };
-    this.ws.send(JSON.stringify(payload));
-    this.pending.set(id, { id, description, sentAt: Date.now() });
+    try {
+      this.ws.send(JSON.stringify(payload));
+      this.pending.set(id, { id, description, sentAt: Date.now() });
+    } catch (error) {
+      recordRuntimeError('WebSocket send failed', error);
+      console.error('WS send error:', error instanceof Error ? error.message : error);
+    }
   }
 
   private subscribe(query: string) {
@@ -284,7 +284,8 @@ class TendermintWS {
       const uzigAmt = m[UZIG_DENOM] ?? m['uzig'];
 
       if (stzigAmt === undefined || uzigAmt === undefined) {
-        console.log('Reserves (unparsed):', reservesStr);
+        // Reserve string didn't contain our configured stZIG/uZIG denoms
+        // (e.g. an unrelated pool's event or an unexpected denom). Skip it.
         return;
       }
 
@@ -295,6 +296,7 @@ class TendermintWS {
       }
       const filteredPrice = this.applySmoothing(rawPrice);
       this.latestPrice = filteredPrice;
+      recordPoolUpdate({ price: filteredPrice, rawPrice, stzig: stzigAmt, uzig: uzigAmt });
 
       const shouldLog =
         this.lastLoggedPrice === undefined || Math.abs(filteredPrice - this.lastLoggedPrice) >= 0.00001;
@@ -346,12 +348,34 @@ class TendermintWS {
   }
 }
 
+process.on('unhandledRejection', (reason) => {
+  recordRuntimeError('Unhandled promise rejection', reason);
+  console.error('[process] unhandled rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  recordRuntimeError('Uncaught exception', error);
+  setConnectionStatus('degraded');
+  console.error('[process] uncaught exception:', error);
+});
 // ---------- RUN ----------
 console.log('RPC WS:', WS_URL);
 console.log('POOL:', POOL_CONTRACT);
 console.log('DENOMS:', { STZIG_DENOM, UZIG_DENOM });
 
+configureMetrics({
+  poolContract: POOL_CONTRACT,
+  wsUrl: WS_URL,
+  lowerTarget: LOWER_TARGET,
+  upperTarget: UPPER_TARGET,
+  cooldownMs: COOLDOWN_MS,
+  walletAddress: WALLET_ADDRESS,
+  zones: [...BUY_STZIG_ZONES, ...BUY_ZIG_ZONES],
+});
+startDashboardServer();
+
 const bot = new TendermintWS(WS_URL);
+// start telegram polling, provide live ratio getter and threshold getter
 // start telegram polling, provide live ratio getter and threshold getter
 startTelegramBot(
   () => (bot as any).latestPrice as number | undefined,

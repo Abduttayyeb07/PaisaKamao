@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#09100f">
+  <title>Arbitrage Bot | Trading Center</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div><strong>Arbitrage Bot</strong><small>Trading center</small></div>
+      </div>
+
+      <nav class="main-nav" aria-label="Main navigation">
+        <p class="nav-caption">Workspace</p>
+        <a href="#overview" data-scroll="overview" class="active"><span class="nav-icon"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1"/><rect x="9" y="9" width="5.5" height="5.5" rx="1"/></svg></span>Overview</a>
+        <a href="#transactions" data-scroll="transactions-section"><span class="nav-icon"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11M1.5 11 4 13.5 6.5 11M12 13.5v-11M9.5 5 12 2.5 14.5 5"/></svg></span>Transactions</a>
+        <a href="#strategy" data-scroll="strategy-section"><span class="nav-icon"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3.4"/><circle cx="8" cy="8" r=".6" fill="currentColor"/></svg></span>Strategy</a>
+        <a href="#activity" data-scroll="activity-section"><span class="nav-icon"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-4.8 3 9.6 2-4.8h3"/></svg></span>Activity</a>
+      </nav>
+
+      <div class="sidebar-glance">
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="network-card">
+          <div class="network-heading"><span class="status-dot booting" id="statusDot"></span><span id="statusLabel">Starting</span></div>
+          <strong>Zigchain mainnet</strong>
+          <span class="network-url">RPC stream</span>
+          <div class="network-line"><span id="sessionAge">Session </span><span class="pulse"></span></div>
+        </div>
+        <div class="sidebar-footer"><span class="tiny-logo">Z</span><span>Local bot console</span><span class="version">v0.1</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content" id="overview">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Workspace</span><i>/</i><strong>Overview</strong></div>
+        <div class="topbar-actions">
+          <span class="update-text" id="lastUpdated">Waiting for data</span>
+          <button class="icon-button" id="refreshButton" title="Refresh dashboard" aria-label="Refresh dashboard">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.7 2.2v3h-3"/></svg>
+          </button>
+          <span class="topbar-divider"></span>
+          <div class="avatar">Z</div>
+        </div>
+      </header>
+
+      <div class="page-content">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow">Automated liquidity monitor</p>
+            <h1>Good morning, operator <span class="heading-dot">.</span></h1>
+            <p class="heading-copy">A clear view of your ZIG and stZIG trading activity.</p>
+          </div>
+          <div class="status-pill"><span class="status-dot connected"></span><span id="statusLabelDuplicate">Live monitoring</span></div>
+        </section>
+
+        <section class="metric-grid" aria-label="Trading summary">
+          <article class="metric-card featured">
+            <div class="metric-top"><span></span><span class="metric-icon green"></span></div>
+            <strong class="metric-value positive" id="pnlValue"> ZIG</strong>
+            <div class="metric-breakdown"><div><span>Realized</span><strong id="pnlRealizedTop">0.00 ZIG</strong></div><div><span>Unrealized</span><strong id="pnlUnrealizedTop">0.00 ZIG</strong></div></div>
+            <div class="metric-spark green-spark"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-top"><span>ZIG deployed</span><span class="metric-icon blue">Z</span></div>
+            <strong class="metric-value" id="zigBought"> ZIG</strong>
+            <p id="zigBoughtSub">No transactions</p>
+            <div class="metric-foot"><span class="dot blue-dot"></span><span>Capital into stZIG</span></div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-top"><span>stZIG acquired</span><span class="metric-icon purple">S</span></div>
+            <strong class="metric-value" id="stzigBought"> stZIG</strong>
+            <p id="stzigBoughtSub">Estimated balance </p>
+            <div class="metric-foot"><span class="dot purple-dot"></span><span>Current inventory</span></div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-top"><span>Transactions</span><span class="metric-icon amber"></span></div>
+            <strong class="metric-value" id="transactions">0</strong>
+            <p id="transactionsSub">0 buys  0 sells</p>
+            <div class="metric-foot"><span class="dot amber-dot"></span><span>Confirmed swaps</span></div>
+          </article>
+        </section>
+
+        <section class="dashboard-grid">
+          <div class="dashboard-stack dashboard-main">
+            <article class="panel chart-panel">
+              <div class="panel-heading">
+                <div><p class="panel-kicker">Pool intelligence</p><h2>Live ratio</h2></div>
+                <div class="chart-heading-value"><strong id="chartPrice"></strong><span>UZIG / stZIG</span></div>
+              </div>
+              <div class="chart-meta"><span class="live-indicator"><i></i> Live price stream</span><span id="chartUpdated">Waiting for pool event</span></div>
+              <div class="chart-wrap">
+                <div id="ratioChart"></div>
+                <div class="chart-empty-overlay" id="emptyOverlay"><span class="loader"></span><strong>Waiting for Zigchain</strong><small>The first swap event will populate the chart.</small></div>
+              </div>
+              <div class="chart-footer">
+                <div class="legend"><span class="legend-line"></span>Pool ratio <span class="legend-band"></span>Trigger band</div>
+                <span class="raw-value" id="rawPrice">raw </span>
+              </div>
+            </article>
+
+            <article class="panel table-panel" id="transactions-section">
+              <div class="panel-heading table-heading">
+                <div><p class="panel-kicker">Audit trail</p><h2>Recent transactions</h2></div>
+                <span class="table-note">Newest first</span>
+              </div>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>Action</th><th>Price</th><th>Offer</th><th>Est. received</th><th>Transaction</th><th>Time</th></tr></thead>
+                  <tbody id="tradeRows"></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="panel watch-panel" id="trigger-watch-section">
+              <div class="panel-heading">
+                <div><p class="panel-kicker">Trigger watch</p><h2>Next action</h2></div>
+                <span class="watch-status waiting" id="watchStatus">Waiting</span>
+              </div>
+              <div class="watch-body">
+                <div class="watch-primary">
+                  <span id="watchActionLabel">Waiting for price</span>
+                  <strong id="watchZone">--</strong>
+                  <small id="watchReason">Live pool ratio will choose the nearest configured zone.</small>
+                </div>
+                <div class="watch-grid">
+                  <div><span>Distance</span><strong id="watchDistance">--</strong></div>
+                  <div><span>Order size</span><strong id="watchSize">--</strong></div>
+                  <div><span>Trigger price</span><strong id="watchBoundary">--</strong></div>
+                  <div><span>Order ID</span><strong id="watchOrder">--</strong></div>
+                </div>
+              </div>
+            </article>
+            <div class="activity-details-row">
+              <article class="panel activity-panel" id="activity-section">
+                <div class="panel-heading"><div><p class="panel-kicker">System log</p><h2>Recent activity</h2></div><span class="activity-count">Live</span></div>
+                <div class="activity-list" id="activityRows"></div>
+              </article>
+
+              <article class="panel details-panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Configuration</p><h2>Bot details</h2></div><span class="mini-tag">Local</span></div>
+                <div class="detail-list">
+                  <div><span>Pool contract</span><strong class="mono" id="poolAddress"></strong></div>
+                  <div><span>Wallet</span><strong class="mono" id="walletAddress">Not configured</strong></div>
+                  <div><span>stZIG reserve</span><strong class="mono" id="reserveStzig"></strong></div>
+                  <div><span>ZIG reserve</span><strong class="mono" id="reserveUzig"></strong></div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="dashboard-stack dashboard-side">
+            <article class="panel position-panel">
+              <div class="panel-heading">
+                <div><p class="panel-kicker">Portfolio</p><h2>Position snapshot</h2></div>
+                <span class="mini-tag">Estimated</span>
+              </div>
+              <div class="position-total"><strong id="positionBalance"> stZIG</strong><span id="positionValue"> ZIG mark value</span></div>
+              <div class="position-bars">
+                <div class="bar-label"><span>ZIG deployed</span><strong id="zigSpent"></strong></div>
+                <div class="bar-track"><span class="bar-fill blue" style="width: 66%"></span></div>
+                <div class="bar-label"><span>ZIG returned</span><strong id="zigReceived"></strong></div>
+                <div class="bar-track"><span class="bar-fill green" style="width: 25%"></span></div>
+              </div>
+              <div class="split-stats">
+                <div><span>Realized PnL</span><strong id="realizedPnl" class="positive"></strong></div>
+                <div><span>Unrealized PnL</span><strong id="unrealizedPnl" class="positive"></strong></div>
+              </div>
+              <p class="footnote" id="feesNote">Network fees are excluded from PnL</p>
+            </article>
+
+            <article class="panel strategy-panel" id="strategy-section">
+              <div class="panel-heading">
+                <div><p class="panel-kicker">Execution rules</p><h2>Active strategy</h2></div>
+                <span class="active-tag"><i></i> Active</span>
+              </div>
+              <div class="strategy-price"><span>Current ratio</span><strong id="priceValue"></strong><small id="triggerBand">Trigger band </small></div>
+              <div class="strategy-progress"><span class="progress-marker" id="strategyMarker" style="left: 50%"></span><span class="progress-fill" id="strategyFill"></span></div>
+              <div class="progress-labels"><span>Lower target</span><strong>Trigger zone</strong><span>Upper target</span></div>
+              <div class="zone-list" id="zoneRows"></div>
+            </article>
+
+          </div>
+        </section>
+        <footer class="page-footer"><span>Arbitrage bot dashboard</span><span>Metrics are local and read from the running bot</span></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -3,8 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node src/ws-ratio.ts",
-    "build": "tsc -p .",
+    "dev": "npm run build:frontend && ts-node src/ws-ratio.ts",
+    "build": "npm run build:server && npm run build:frontend",
+    "build:server": "tsc -p .",
+    "build:frontend": "tsc -p frontend/tsconfig.json",
     "start": "node dist/ws-ratio.js"
   },
   "dependencies": {

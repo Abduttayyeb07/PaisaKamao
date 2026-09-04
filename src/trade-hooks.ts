@@ -1,7 +1,8 @@
-﻿import { DirectSecp256k1Wallet } from '@cosmjs/proto-signing';
+import { DirectSecp256k1Wallet } from '@cosmjs/proto-signing';
 import { SigningCosmWasmClient, CosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice, coins } from '@cosmjs/stargate';
 import { notifyTrade } from './telegram';
+import { recordRuntimeError, recordTrade } from './metrics';
 import { promises as fs, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 
@@ -144,6 +145,14 @@ function formatErrorForNotification(raw: unknown): string[] {
   return lines;
 }
 
+async function safeNotifyTrade(message: string, options?: { txHash?: string }): Promise<void> {
+  try {
+    await notifyTrade(message, options);
+  } catch (e) {
+    recordRuntimeError('Telegram notification failed', e);
+    console.warn('[telegram] notification failed:', e instanceof Error ? e.message : e);
+  }
+}
 export type TradeContext = {
   priceUzigPerStzig: number;
   rawPriceUzigPerStzig?: number;
@@ -249,11 +258,19 @@ function checkZoneAllowed(zoneLabel?: string) {
 }
 
 async function persistZoneState() {
+  const tempPath = ZONE_STATE_PATH + '.tmp';
   try {
     await fs.mkdir(dirname(ZONE_STATE_PATH), { recursive: true });
-    await fs.writeFile(ZONE_STATE_PATH, JSON.stringify(zoneExecutionHours), 'utf8');
-  } catch {
-    // ignore
+    await fs.writeFile(tempPath, JSON.stringify(zoneExecutionHours), 'utf8');
+    await fs.rename(tempPath, ZONE_STATE_PATH);
+  } catch (e) {
+    recordRuntimeError('Zone state persistence failed', e);
+    console.warn('[trade-hooks] failed to persist zone state:', e instanceof Error ? e.message : e);
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      // ignore temp cleanup failure
+    }
   }
 }
 
@@ -505,8 +522,20 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
     ]
       .filter(Boolean)
       .join('\n');
-    await notifyTrade(detailLines, { txHash: tx });
-    markZoneExecuted(zoneLabel, bucket);
+    await markZoneExecuted(zoneLabel, bucket);
+    const offerZig = fromUnits(desiredUnits, UZIG_EXP);
+    recordTrade({
+      action: 'BUY_STZIG',
+      intent: ctx.tradeIntent ?? 'buyStzig',
+      range: zoneLabel,
+      price: ctx.priceUzigPerStzig,
+      offerAsset: 'UZIG',
+      offerAmount: offerZig,
+      receivedAsset: 'STZIG',
+      receivedAmount: offerZig / ctx.priceUzigPerStzig,
+      txHash: tx,
+      estimated: true,
+    });
     await appendTradeLog({
       timestamp: new Date().toISOString(),
       bucket,
@@ -522,6 +551,7 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
       ctx.priceUzigPerStzig,
       tx
     );
+    await safeNotifyTrade(detailLines, { txHash: tx });
   } catch (e) {
     console.error('[BUY] failed');
     for (const line of formatErrorForLog(e)) {
@@ -539,7 +569,7 @@ export async function onBuy(ctx: TradeContext): Promise<void> {
     ]
       .filter((l) => l !== undefined)
       .join('\n');
-    await notifyTrade(errLine);
+    await safeNotifyTrade(errLine);
   }
 }
 
@@ -589,8 +619,20 @@ export async function onSell(ctx: TradeContext): Promise<void> {
     ]
       .filter(Boolean)
       .join('\n');
-    await notifyTrade(detailLines, { txHash: tx });
     await markZoneExecuted(zoneLabel, bucket);
+    const offerStzig = fromUnits(desiredUnits, STZIG_EXP);
+    recordTrade({
+      action: 'SELL_STZIG',
+      intent: ctx.tradeIntent ?? 'buyZig',
+      range: zoneLabel,
+      price: ctx.priceUzigPerStzig,
+      offerAsset: 'STZIG',
+      offerAmount: offerStzig,
+      receivedAsset: 'UZIG',
+      receivedAmount: offerStzig * ctx.priceUzigPerStzig,
+      txHash: tx,
+      estimated: true,
+    });
     await appendTradeLog({
       timestamp: new Date().toISOString(),
       bucket,
@@ -606,6 +648,7 @@ export async function onSell(ctx: TradeContext): Promise<void> {
       ctx.priceUzigPerStzig,
       tx
     );
+    await safeNotifyTrade(detailLines, { txHash: tx });
   } catch (e) {
     console.error('[SELL] failed');
     for (const line of formatErrorForLog(e)) {
@@ -623,6 +666,6 @@ export async function onSell(ctx: TradeContext): Promise<void> {
     ]
       .filter((l) => l !== undefined)
       .join('\n');
-    await notifyTrade(errLine);
+    await safeNotifyTrade(errLine);
   }
 }
