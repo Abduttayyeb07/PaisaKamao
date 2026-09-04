@@ -171,7 +171,6 @@ class TendermintWS {
   private smoothedPrice: number | undefined = undefined;
   private lastLoggedPrice: number | undefined = undefined;
   private readonly smoothingAlpha = SMOOTHING_ALPHA;
-  private lastZone: { type: TradeIntent; index: number } | undefined = undefined;
 
   constructor(private url: string) {}
 
@@ -311,13 +310,10 @@ class TendermintWS {
 
       const now = Date.now();
       const zone = determineTradeZone(filteredPrice);
-      if (!zone) {
-        this.lastZone = undefined;
-        return;
-      }
-      if (this.lastZone && this.lastZone.type === zone.type && this.lastZone.index === zone.index) {
-        return;
-      }
+      if (!zone) return;
+      // No same-zone skip: the per-zone 30s bucket in trade-hooks.ts (getHourBucket)
+      // plus COOLDOWN_MS below are the only gates, so a zone can retrigger every 30s
+      // while price stays inside it.
       if (COOLDOWN_MS > 0 && now - this.lastTradeAt < COOLDOWN_MS) return;
 
       const ctx = {
@@ -335,7 +331,6 @@ class TendermintWS {
       };
 
       this.lastTradeAt = now;
-      this.lastZone = { type: zone.type, index: zone.index };
 
       if (zone.type === 'buyZig') {
         void Promise.resolve(onSell(ctx)).catch((e) => console.error('onSell error:', e));
